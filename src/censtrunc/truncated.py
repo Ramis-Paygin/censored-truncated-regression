@@ -1,0 +1,332 @@
+"""Truncated normal regression with arbitrary left/right truncation thresholds.
+
+The model is
+
+    Y* = X'beta + e,   e | X ~ N(0, sigma^2),
+
+with the observation rule that only ``Y*`` falling strictly inside the interval
+``(L, R)`` is observed. Observations outside this interval are absent from the
+sample entirely (unlike censoring, where they would pile up at the threshold).
+
+The log-likelihood divides each normal density by the truncation probability:
+
+    log f(y_i | L < y* < R) = log[(1/sigma) phi((y - X'beta)/sigma)]
+                            - log[Phi((R - X'beta)/sigma) - Phi((L - X'beta)/sigma)]
+
+For one-sided truncation either the left or right Phi-term drops out.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+import numpy as np
+from scipy.optimize import minimize
+from scipy.special import log_ndtr
+from scipy.stats import chi2, norm
+
+from . import _likelihood as _llf
+from ._utils import _prepare_design_matrix, _prepare_y, _resolve_thresholds
+
+
+@dataclass
+class _FitDiagnostics:
+    converged: bool
+    n_iterations: int
+    optimiser_message: str
+    final_grad_norm: float
+
+
+@dataclass
+class TruncatedRegression:
+    """Maximum-likelihood estimation of a truncated normal regression.
+
+    Parameters
+    ----------
+    left, right : float or None
+        Truncation thresholds. At least one must be supplied. All ``y`` values
+        passed to ``fit`` must lie strictly inside ``(left, right)``.
+    fit_intercept : bool
+        Whether to prepend an intercept column.
+    optimizer, max_iter, tol :
+        Forwarded to :func:`scipy.optimize.minimize`.
+
+    Notes
+    -----
+    Unlike the censored case, the truncated log-likelihood is *not* generally
+    concave under Olsen's reparameterisation, so optimisation is performed in
+    the natural ``(sigma, beta)`` parameterisation. OLS on the truncated sample
+    provides good starting values for the search.
+    """
+
+    left: float | None = None
+    right: float | None = None
+    fit_intercept: bool = True
+    optimizer: str = "L-BFGS-B"
+    max_iter: int = 200
+    tol: float = 1e-8
+
+    params_: np.ndarray = field(default=None, init=False, repr=False)  # type: ignore[assignment]
+    coef_: np.ndarray = field(default=None, init=False, repr=False)  # type: ignore[assignment]
+    sigma_: float = field(default=np.nan, init=False, repr=False)
+    bse_: np.ndarray = field(default=None, init=False, repr=False)  # type: ignore[assignment]
+    cov_params_: np.ndarray = field(default=None, init=False, repr=False)  # type: ignore[assignment]
+    tvalues_: np.ndarray = field(default=None, init=False, repr=False)  # type: ignore[assignment]
+    pvalues_: np.ndarray = field(default=None, init=False, repr=False)  # type: ignore[assignment]
+    conf_int_: np.ndarray = field(default=None, init=False, repr=False)  # type: ignore[assignment]
+    llf_: float = field(default=np.nan, init=False, repr=False)
+    llnull_: float = field(default=np.nan, init=False, repr=False)
+    llr_: float = field(default=np.nan, init=False, repr=False)
+    llr_pvalue_: float = field(default=np.nan, init=False, repr=False)
+    prsquared_: float = field(default=np.nan, init=False, repr=False)
+    aic_: float = field(default=np.nan, init=False, repr=False)
+    bic_: float = field(default=np.nan, init=False, repr=False)
+    n_obs_: int = field(default=0, init=False, repr=False)
+    feature_names_: list[str] = field(default_factory=list, init=False, repr=False)
+    diagnostics_: _FitDiagnostics | None = field(default=None, init=False, repr=False)
+    _left: float = field(default=-np.inf, init=False, repr=False)
+    _right: float = field(default=np.inf, init=False, repr=False)
+    _has_left: bool = field(default=False, init=False, repr=False)
+    _has_right: bool = field(default=False, init=False, repr=False)
+    _fitted: bool = field(default=False, init=False, repr=False)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def fit(
+        self,
+        X: Any,
+        y: Any,
+        feature_names: list[str] | None = None,
+    ) -> "TruncatedRegression":
+        """Estimate the truncated regression by maximum likelihood."""
+        if self.left is None and self.right is None:
+            raise ValueError(
+                "Truncated regression requires at least one of `left` or `right` to be set."
+            )
+        self._left, self._right, self._has_left, self._has_right = _resolve_thresholds(
+            self.left, self.right
+        )
+
+        X_design, columns = _prepare_design_matrix(
+            X, fit_intercept=self.fit_intercept, feature_names=feature_names
+        )
+        y_arr = _prepare_y(y, n_expected=X_design.shape[0])
+        self.feature_names_ = columns
+
+        # Validate that y is strictly inside the truncation interval
+        if self._has_left and np.any(y_arr <= self._left):
+            raise ValueError(
+                f"All y values must satisfy y > left ({self._left}); found {(y_arr <= self._left).sum()} violations."
+            )
+        if self._has_right and np.any(y_arr >= self._right):
+            raise ValueError(
+                f"All y values must satisfy y < right ({self._right}); found {(y_arr >= self._right).sum()} violations."
+            )
+
+        params_hat = self._fit_optimize(X_design, y_arr)
+        sigma_hat = float(params_hat[0])
+        beta_hat = params_hat[1:].copy()
+
+        cov = self._covariance_matrix(params_hat, X_design, y_arr)
+        bse = np.sqrt(np.diag(cov))
+
+        llf = -_llf.neg_loglik_truncated(
+            params_hat, X_design, y_arr, self._left, self._right,
+            self._has_left, self._has_right,
+        )
+
+        self.params_ = params_hat
+        self.coef_ = beta_hat
+        self.sigma_ = sigma_hat
+        self.cov_params_ = cov
+        self.bse_ = bse
+        # Guard against zero or near-zero standard errors (degenerate covariance).
+        with np.errstate(divide="ignore", invalid="ignore"):
+            self.tvalues_ = np.where(bse > 0, params_hat / bse, np.nan)
+        self.pvalues_ = 2.0 * (1.0 - norm.cdf(np.abs(self.tvalues_)))
+        z_crit = norm.ppf(0.975)
+        self.conf_int_ = np.column_stack(
+            [params_hat - z_crit * bse, params_hat + z_crit * bse]
+        )
+        self.llf_ = float(llf)
+        self.n_obs_ = int(X_design.shape[0])
+        k = params_hat.shape[0]
+        self.aic_ = -2 * llf + 2 * k
+        self.bic_ = -2 * llf + k * np.log(self.n_obs_)
+        self._fitted = True
+
+        if self.fit_intercept or X_design.shape[1] > 1:
+            null_llf = self._fit_null_model(X_design, y_arr)
+            self.llnull_ = null_llf
+            self.llr_ = 2.0 * (self.llf_ - null_llf)
+            df_model = X_design.shape[1] - (1 if self.fit_intercept else 0)
+            if df_model > 0:
+                self.llr_pvalue_ = float(chi2.sf(self.llr_, df_model))
+                self.prsquared_ = 1.0 - self.llf_ / null_llf if null_llf != 0 else np.nan
+
+        return self
+
+    # ------------------------------------------------------------------
+    # Optimisation
+    # ------------------------------------------------------------------
+
+    def _fit_optimize(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
+        # OLS starting values
+        beta_init, *_ = np.linalg.lstsq(X, y, rcond=None)
+        resid = y - X @ beta_init
+        dof = max(X.shape[0] - X.shape[1], 1)
+        sigma_init = float(np.sqrt(max(resid @ resid / dof, 1e-6)))
+        x0 = np.concatenate([[sigma_init], beta_init])
+        bounds = [(1e-8, None)] + [(None, None)] * beta_init.shape[0]
+
+        res = minimize(
+            fun=_llf.neg_loglik_truncated,
+            x0=x0,
+            args=(X, y, self._left, self._right, self._has_left, self._has_right),
+            method=self.optimizer,
+            bounds=bounds,
+            options={"maxiter": self.max_iter, "gtol": self.tol},
+        )
+
+        self.diagnostics_ = _FitDiagnostics(
+            converged=bool(res.success),
+            n_iterations=int(getattr(res, "nit", -1)),
+            optimiser_message=str(res.message),
+            final_grad_norm=float(np.linalg.norm(res.jac) if res.jac is not None else np.nan),
+        )
+        if not res.success:
+            import warnings
+            warnings.warn(
+                f"Optimiser did not converge cleanly: {res.message}",
+                RuntimeWarning,
+                stacklevel=3,
+            )
+        return res.x
+
+    # ------------------------------------------------------------------
+    # Covariance
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _numerical_hessian(f: Any, x: np.ndarray, args: tuple) -> np.ndarray:
+        x = np.asarray(x, dtype=float)
+        n = x.shape[0]
+        step = np.cbrt(np.finfo(float).eps)
+        h = step * np.maximum(np.abs(x), 1.0)
+        H = np.zeros((n, n))
+        fx = f(x, *args)
+        for i in range(n):
+            xp = x.copy(); xp[i] += h[i]
+            xm = x.copy(); xm[i] -= h[i]
+            H[i, i] = (f(xp, *args) - 2 * fx + f(xm, *args)) / (h[i] ** 2)
+        for i in range(n):
+            for j in range(i + 1, n):
+                xpp = x.copy(); xpp[i] += h[i]; xpp[j] += h[j]
+                xpm = x.copy(); xpm[i] += h[i]; xpm[j] -= h[j]
+                xmp = x.copy(); xmp[i] -= h[i]; xmp[j] += h[j]
+                xmm = x.copy(); xmm[i] -= h[i]; xmm[j] -= h[j]
+                H[i, j] = (f(xpp, *args) - f(xpm, *args) - f(xmp, *args) + f(xmm, *args)) / (
+                    4 * h[i] * h[j]
+                )
+                H[j, i] = H[i, j]
+        return 0.5 * (H + H.T)
+
+    def _covariance_matrix(
+        self, params: np.ndarray, X: np.ndarray, y: np.ndarray
+    ) -> np.ndarray:
+        H = self._numerical_hessian(
+            _llf.neg_loglik_truncated,
+            params,
+            args=(X, y, self._left, self._right, self._has_left, self._has_right),
+        )
+        try:
+            return np.linalg.inv(H)
+        except np.linalg.LinAlgError:  # pragma: no cover
+            return np.linalg.pinv(H)
+
+    # ------------------------------------------------------------------
+    # Null model
+    # ------------------------------------------------------------------
+
+    def _fit_null_model(self, X: np.ndarray, y: np.ndarray) -> float:
+        X_null = np.ones((X.shape[0], 1))
+        beta_init = np.array([float(y.mean())])
+        resid = y - X_null @ beta_init
+        sigma_init = float(np.sqrt(max(resid @ resid / max(X_null.shape[0] - 1, 1), 1e-6)))
+        x0 = np.concatenate([[sigma_init], beta_init])
+        bounds = [(1e-8, None), (None, None)]
+        res = minimize(
+            fun=_llf.neg_loglik_truncated,
+            x0=x0,
+            args=(X_null, y, self._left, self._right, self._has_left, self._has_right),
+            method=self.optimizer,
+            bounds=bounds,
+            options={"maxiter": self.max_iter, "gtol": self.tol},
+        )
+        return -float(res.fun)
+
+    # ------------------------------------------------------------------
+    # Prediction
+    # ------------------------------------------------------------------
+
+    def summary(self) -> str:
+        """Return a multi-line text summary of the fitted model."""
+        from ._summary import format_summary_truncated
+
+        self._check_fitted()
+        return format_summary_truncated(self)
+
+    def __str__(self) -> str:  # pragma: no cover - cosmetic
+        if self._fitted:
+            return self.summary()
+        return f"TruncatedRegression(left={self.left!r}, right={self.right!r}, fit_intercept={self.fit_intercept!r}) [not fitted]"
+
+    def predict(self, X: Any, kind: str = "truncated") -> np.ndarray:
+        """Predict conditional expectations for the truncated model.
+
+        Parameters
+        ----------
+        X : array-like
+            New design matrix.
+        kind : {'latent', 'truncated'}, default ``'truncated'``
+            ``'latent'`` returns ``X'beta`` (the untruncated population mean).
+            ``'truncated'`` returns ``E[Y | X, L < Y < R]``.
+        """
+        self._check_fitted()
+        X_design, _ = _prepare_design_matrix(
+            X, fit_intercept=self.fit_intercept,
+            feature_names=self._user_feature_names(),
+        )
+        Xb = X_design @ self.coef_
+        if kind == "latent":
+            return Xb
+        if kind == "truncated":
+            sigma = self.sigma_
+            a_L = (self._left - Xb) / sigma if self._has_left else None
+            a_R = (self._right - Xb) / sigma if self._has_right else None
+            phi_L = norm.pdf(a_L) if a_L is not None else 0.0
+            phi_R = norm.pdf(a_R) if a_R is not None else 0.0
+            Phi_L = norm.cdf(a_L) if a_L is not None else 0.0
+            Phi_R = norm.cdf(a_R) if a_R is not None else 1.0
+            denom = Phi_R - Phi_L
+            denom_safe = np.where(np.abs(denom) > 1e-12, denom, 1.0)
+            return Xb + sigma * (phi_L - phi_R) / denom_safe
+        raise ValueError(f"Unknown kind: {kind!r}; expected 'latent' or 'truncated'.")
+
+    # ------------------------------------------------------------------
+    # Utilities
+    # ------------------------------------------------------------------
+
+    def _user_feature_names(self) -> list[str] | None:
+        if not self.feature_names_:
+            return None
+        if self.fit_intercept and self.feature_names_[0] == "const":
+            return self.feature_names_[1:] or None
+        return self.feature_names_
+
+    def _check_fitted(self) -> None:
+        if not self._fitted:
+            raise RuntimeError("This model has not been fitted yet. Call `fit(X, y)` first.")
