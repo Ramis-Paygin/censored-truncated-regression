@@ -406,7 +406,12 @@ class CensoredRegression:
         mask_right: np.ndarray,
         mask_free: np.ndarray,
     ) -> np.ndarray:
-        """Observed-information covariance matrix in (sigma, beta) parameterisation."""
+        """Observed-information covariance matrix in (sigma, beta) parameterisation.
+
+        ``params`` are the MLE estimates ``[sigma_hat, beta_hat]`` in the natural
+        parameterisation, obtained after back-transforming from Olsen's ``(nu, gamma)``.
+        The Hessian is evaluated at this point to obtain standard errors.
+        """
         H = self._numerical_hessian(
             _llf.neg_loglik_censored,
             params,
