@@ -69,7 +69,7 @@ def neg_loglik_censored_olsen(
 ) -> float:
     """Negative log-likelihood for two-sided censored regression in Olsen parameterisation.
 
-    ``params = [nu, gamma_1, ..., gamma_k]`` where ``nu = 1/sigma`` and ``gamma = beta/sigma``.
+    ``params = [nu, gamma_0, gamma_1, ..., gamma_k]`` where ``nu = 1/sigma`` and ``gamma = beta/sigma``.
     """
     nu = params[0]
     gamma = params[1:]
