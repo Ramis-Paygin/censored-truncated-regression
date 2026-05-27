@@ -39,10 +39,14 @@ def _log_phi_diff(a_lo: np.ndarray, a_hi: np.ndarray) -> np.ndarray:
     log_hi = log_ndtr(a_hi)
     log_lo = log_ndtr(a_lo)
     diff = log_lo - log_hi
-    # If the interval is degenerate (round-off makes log_lo >= log_hi), the
-    # probability is effectively zero and the corresponding log-likelihood is
-    # -inf. We return a large negative number to keep the optimiser away from
-    # this region without raising a runtime warning.
+    # If the interval is degenerate (round-off makes diff >= 0), two failure
+    # modes arise:
+    #   - diff > 0  → exp(diff) > 1 → log(negative) = NaN;
+    #     np.minimum clamps diff to -1e-30, turning NaN into -inf.
+    #   - diff == 0 → exp(0) = 1    → log(0) = -inf.
+    # In both cases the truncation probability is effectively zero.
+    # np.where replaces -inf and any residual NaN with -1e30 so the optimiser
+    # receives a finite penalty and can step away without a runtime warning.
     with np.errstate(divide="ignore", invalid="ignore"):
         result = log_hi + np.log1p(-np.exp(np.minimum(diff, -1e-30)))
     return np.where(np.isfinite(result), result, -1e30)
