@@ -160,10 +160,19 @@ model.get_margeff(at="mean", method="eyex", kind="censored")
 # discrete-difference for binary regressors
 model.get_margeff(method="dydx", dummy=True)
 
+# effect on the probability of each region (these three sum to zero)
+model.get_margeff(kind="prob-left")      # d P(Y = L) / dx
+model.get_margeff(kind="prob-interior")  # d P(L < Y < R) / dx
+model.get_margeff(kind="prob-right")     # d P(Y = R) / dx
+
 # convenient shorthands
 model.ame(kind="censored")     # == get_margeff(at="overall")
 model.mem(kind="censored")     # == get_margeff(at="mean")
 ```
+
+`kind` selects the quantity whose marginal effect is reported: a conditional
+mean (`latent`, `censored`, `truncated`) or a **region probability**
+(`prob-left`, `prob-interior`, `prob-right`).
 
 | `at` | meaning | | `method` | meaning |
 |------|---------|---|----------|---------|

@@ -237,8 +237,9 @@ def _margeff_vector(
     left, right = model._left, model._right  # type: ignore[attr-defined]
     has_left, has_right = model._has_left, model._has_right  # type: ignore[attr-defined]
 
-    # base derivative effects (n_rows, k_slopes)
-    effect = _means.dmean_dx(
+    # base derivative effects (n_rows, k_slopes) — works for both conditional
+    # means (latent/censored/truncated) and region probabilities (prob-*).
+    effect = _means.dydx_for_kind(
         beta, sigma, rows, left, right, has_left, has_right, kind, slope_beta
     )
 
@@ -257,17 +258,17 @@ def _margeff_vector(
                 base = np.round(rows[:, col])
                 rows_hi[:, col] = base + 1.0
                 rows_lo[:, col] = base
-            m_hi = _means.conditional_mean(
+            m_hi = _means.value_for_kind(
                 beta, sigma, rows_hi, left, right, has_left, has_right, kind
             )
-            m_lo = _means.conditional_mean(
+            m_lo = _means.value_for_kind(
                 beta, sigma, rows_lo, left, right, has_left, has_right, kind
             )
             effect[:, local_j] = m_hi - m_lo
 
     # elasticity / semi-elasticity transforms
     if method != "dydx":
-        ypred = _means.conditional_mean(
+        ypred = _means.value_for_kind(
             beta, sigma, rows, left, right, has_left, has_right, kind
         )
         xvals = rows[:, col_idx]  # (n_rows, k)

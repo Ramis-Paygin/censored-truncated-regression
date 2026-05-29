@@ -496,8 +496,10 @@ class CensoredRegression:
             self._left, self._right, self._has_left, self._has_right, kind,
         )
 
-    # Which conditional means support marginal effects (see effects.get_margeff).
-    _valid_margeff_kinds = _means.CENSORED_KINDS
+    # Which conditional means / probabilities support marginal effects
+    # (see effects.get_margeff): the three means plus the three region
+    # probabilities (prob-left / prob-interior / prob-right).
+    _valid_margeff_kinds = _means.MARGEFF_CENSORED_KINDS
 
     def get_margeff(
         self,

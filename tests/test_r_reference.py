@@ -28,10 +28,10 @@ LEFT, RIGHT = 0.0, 2.5
 
 
 def _r_available() -> bool:
-    """True if Rscript and the needed packages (AER, truncreg, jsonlite) exist."""
+    """True if Rscript and the needed packages (survival, truncreg, jsonlite) exist."""
     if shutil.which("Rscript") is None:
         return False
-    probe = "quit(status = if (all(c('AER','truncreg','jsonlite') %in% rownames(installed.packages()))) 0 else 1)"
+    probe = "quit(status = if (all(c('survival','truncreg','jsonlite') %in% rownames(installed.packages()))) 0 else 1)"
     try:
         res = subprocess.run(
             ["Rscript", "-e", probe], capture_output=True, timeout=60, check=False
@@ -43,7 +43,7 @@ def _r_available() -> bool:
 
 pytestmark = pytest.mark.skipif(
     not _r_available(),
-    reason="R with packages AER, truncreg, jsonlite is required for the reference comparison",
+    reason="R with packages survival, truncreg, jsonlite is required for the reference comparison",
 )
 
 

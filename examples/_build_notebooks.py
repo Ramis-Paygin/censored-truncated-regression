@@ -197,6 +197,32 @@ def _build_two_sided_notebook() -> nbf.NotebookNode:
             "elas.summary_frame().round(4)"
         ),
         _md(
+            "### Marginal effects on the region probabilities\n"
+            "\n"
+            "Beyond the conditional mean, we can ask how a regressor shifts the"
+            " *probability* of each region: landing at the left threshold"
+            " ($P(Y=L)=\\Phi(\\alpha_L)$), in the interior"
+            " ($P(L<Y<R)=\\Phi(\\alpha_R)-\\Phi(\\alpha_L)$), or at the right"
+            " threshold ($P(Y=R)=1-\\Phi(\\alpha_R)$). These are selected with"
+            " `kind='prob-left'`, `'prob-interior'`, `'prob-right'`. Because the"
+            " three probabilities sum to one, their marginal effects sum to zero."
+        ),
+        _code(
+            "prob_effects = pd.DataFrame({\n"
+            "    'P(Y=L)':     model.get_margeff(kind='prob-left').margeff,\n"
+            "    'P(L<Y<R)':   model.get_margeff(kind='prob-interior').margeff,\n"
+            "    'P(Y=R)':     model.get_margeff(kind='prob-right').margeff,\n"
+            "}, index=['x1', 'x2', 'x3'])\n"
+            "prob_effects['sum (=0)'] = prob_effects.sum(axis=1)\n"
+            "prob_effects.round(4)"
+        ),
+        _md(
+            "A positive coefficient pushes observations out of the left pile-up"
+            " and toward the right one, so the `P(Y=L)` effect is negative and the"
+            " `P(Y=R)` effect is positive; the `sum (=0)` column confirms the"
+            " adding-up constraint holds numerically."
+        ),
+        _md(
             "## Likelihood-ratio test\n"
             "\n"
             "We test whether `x3` is jointly redundant by fitting a restricted"

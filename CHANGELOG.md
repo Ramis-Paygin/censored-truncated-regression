@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dyex, eydx}; `dummy`/`count` for discrete regressors), with delta-method
   standard errors, a statsmodels-style `summary()`, and a `summary_frame()`.
   `ame()` / `mem()` remain as shorthands for `at='overall'` / `at='mean'`.
+  Beyond the conditional means, `kind` also accepts `prob-left`,
+  `prob-interior`, and `prob-right` to report marginal effects on the
+  probability of each region (P(Y=L), P(L<Y<R), P(Y=R)); these three effects
+  sum to zero by construction.
 - Validation tests: in the no-censoring limit the estimator reproduces OLS
   (coefficients, MLE scale, and log-likelihood) to optimiser tolerance, checked
   against `statsmodels.OLS`; an optional comparison against R's `AER::tobit`
