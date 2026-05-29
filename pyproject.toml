@@ -56,6 +56,14 @@ examples = [
     "nbformat>=5.9",
     "nbclient>=0.8",
 ]
+docs = [  # building the combined report PDF (examples/_build_report.py + webpdf)
+    "pandas>=2.0",
+    "statsmodels>=0.14",
+    "matplotlib>=3.7",
+    "nbformat>=5.9",
+    "nbclient>=0.8",
+    "nbconvert[webpdf]>=7.0",
+]
 dev = [
     "pytest>=7",
     "pandas>=2.0",

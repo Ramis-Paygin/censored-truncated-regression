@@ -205,6 +205,22 @@ Rebuild the notebooks from source with
 python examples/_build_notebooks.py
 ```
 
+### Single combined PDF report
+
+For a self-contained document (title page, model description with formulas, and
+all three examples as sections), build and render the combined report:
+
+```bash
+pip install -e .[docs]              # adds nbconvert[webpdf]
+python examples/_build_report.py    # assembles examples/censtrunc_report.ipynb
+playwright install chromium         # one-time: headless browser for PDF export
+jupyter nbconvert --to webpdf examples/censtrunc_report.ipynb
+# -> examples/censtrunc_report.pdf
+```
+
+(The `webpdf` route needs no LaTeX. If you have a LaTeX toolchain installed,
+`--to pdf` works too.)
+
 ## Testing
 
 ```bash
