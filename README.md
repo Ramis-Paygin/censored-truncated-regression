@@ -75,9 +75,12 @@ $$f(y_i \mid L < Y_i^* < R) = \frac{\sigma^{-1}\,\phi((y_i - X_i'\beta)/\sigma)}
 - Three flavours of prediction: `latent` ($X'\beta$), `censored` ($\mathbb E[Y\mid X]$),
   and `truncated` ($\mathbb E[Y\mid X, L<Y<R]$); plus `predict_proba` returning
   region probabilities.
-- **AME** (Average Marginal Effect) and **MEM** (Marginal Effect at the Mean)
-  for all three notions of conditional mean, with **delta-method standard
-  errors**.
+- **Marginal effects** via a single `get_margeff` method whose API mirrors
+  statsmodels' `get_margeff`: choose *where* to evaluate (`at='overall'` = AME,
+  `at='mean'` = MEM, plus `'median'`/`'zero'`) and *what* to report
+  (`method='dydx'` derivative, or `'eyex'`/`'dyex'`/`'eydx'` elasticities), with
+  discrete-variable handling (`dummy=True`) and **delta-method standard errors**.
+  `ame()` and `mem()` are provided as convenient shorthands.
 - **Likelihood-ratio test** (`lr_test`) for any pair of nested models.
 - **statsmodels-style `summary()`** with coefficient table, Wald confidence
   intervals, AIC/BIC, McFadden's pseudo-$R^2$, overall LR test, and per-region
@@ -143,13 +146,31 @@ from censtrunc import TruncatedRegression
 model = TruncatedRegression(left=0.0, right=2.5).fit(X, y)
 ```
 
-### Marginal effects
+### Marginal effects (`get_margeff`)
 
 ```python
-ame  = model.ame(kind="censored")           # MarginalEffects object
-print(ame.to_dataframe())                    # pandas DataFrame view
-mem  = model.mem(kind="censored")            # at the sample mean
+# statsmodels-style: one method, options select where and what
+me = model.get_margeff(at="overall", method="dydx", kind="censored")
+print(me.summary())            # statsmodels-style table
+me.summary_frame()             # pandas DataFrame
+
+# elasticity at the sample mean
+model.get_margeff(at="mean", method="eyex", kind="censored")
+
+# discrete-difference for binary regressors
+model.get_margeff(method="dydx", dummy=True)
+
+# convenient shorthands
+model.ame(kind="censored")     # == get_margeff(at="overall")
+model.mem(kind="censored")     # == get_margeff(at="mean")
 ```
+
+| `at` | meaning | | `method` | meaning |
+|------|---------|---|----------|---------|
+| `overall` | average over sample (AME) | | `dydx` | derivative dy/dx |
+| `mean` | at the mean (MEM) | | `eyex` | elasticity |
+| `median` | at the median | | `dyex` | semi-elasticity (dy/d ln x) |
+| `zero` | at zero | | `eydx` | semi-elasticity (d ln y/dx) |
 
 ### Likelihood-ratio test
 

@@ -28,6 +28,7 @@ from scipy.optimize import minimize
 from scipy.stats import chi2, norm
 
 from . import _likelihood as _llf
+from . import _means
 from ._utils import (
     _classify_observations,
     _prepare_design_matrix,
@@ -482,92 +483,69 @@ class CensoredRegression:
             - ``'truncated'`` returns ``E[Y | X, L < Y < R]`` (mean over the interior).
         """
         self._check_fitted()
+        if kind not in _means.CENSORED_KINDS:
+            raise ValueError(
+                f"Unknown kind: {kind!r}; expected one of {_means.CENSORED_KINDS}."
+            )
         X_design, _ = _prepare_design_matrix(
             X, fit_intercept=self.fit_intercept,
             feature_names=self._user_feature_names(),
         )
-        Xb = X_design @ self.coef_
-        if kind == "latent":
-            return Xb
+        return _means.conditional_mean(
+            self.coef_, self.sigma_, X_design,
+            self._left, self._right, self._has_left, self._has_right, kind,
+        )
 
-        sigma = self.sigma_
-        a_L = (self._left - Xb) / sigma if self._has_left else None
-        a_R = (self._right - Xb) / sigma if self._has_right else None
+    # Which conditional means support marginal effects (see effects.get_margeff).
+    _valid_margeff_kinds = _means.CENSORED_KINDS
 
-        Phi_L = norm.cdf(a_L) if a_L is not None else 0.0
-        Phi_R = norm.cdf(a_R) if a_R is not None else 1.0
-        phi_L = norm.pdf(a_L) if a_L is not None else 0.0
-        phi_R = norm.pdf(a_R) if a_R is not None else 0.0
-
-        if kind == "censored":
-            interior = Xb * (Phi_R - Phi_L) + sigma * (phi_L - phi_R)
-            left_mass = (self._left * Phi_L) if self._has_left else 0.0
-            right_mass = (self._right * (1.0 - Phi_R)) if self._has_right else 0.0
-            return left_mass + interior + right_mass
-
-        if kind == "truncated":
-            denom = Phi_R - Phi_L
-            # avoid 0/0; if denom is tiny, fall back to latent prediction
-            denom_safe = np.where(np.abs(denom) > 1e-12, denom, 1.0)
-            mean = Xb + sigma * (phi_L - phi_R) / denom_safe
-            return mean
-
-        raise ValueError(f"Unknown kind: {kind!r}; expected 'latent', 'censored', or 'truncated'.")
-
-    def ame(self, X: Any = None, kind: str = "censored"):
-        """Average Marginal Effects (AME) with delta-method standard errors.
-
-        The effect ``dE[Y|X]/dX_j`` (or its latent / truncated variant) is computed
-        at every row of ``X`` and then averaged. By default ``X`` is the training
-        sample, which is the standard definition; passing an alternative sample
-        gives the AME over that distribution.
+    def get_margeff(
+        self,
+        at: str = "overall",
+        method: str = "dydx",
+        kind: str = "censored",
+        atexog: dict | None = None,
+        dummy: bool = False,
+        count: bool = False,
+    ):
+        """Marginal effects, with an API mirroring statsmodels' ``get_margeff``.
 
         Parameters
         ----------
-        X : array-like, optional
-            Sample of regressors. Defaults to the training data.
-        kind : {'latent', 'censored', 'truncated'}, default ``'censored'``.
+        at : {'overall', 'mean', 'median', 'zero'}, default ``'overall'``
+            Where to evaluate the effect. ``'overall'`` averages the
+            per-observation effects (AME); ``'mean'`` evaluates at the mean
+            regressor (MEM).
+        method : {'dydx', 'eyex', 'dyex', 'eydx'}, default ``'dydx'``
+            Derivative (``dydx``) or elasticity / semi-elasticity.
+        kind : {'latent', 'censored', 'truncated'}, default ``'censored'``
+            Which conditional mean the effect refers to.
+        atexog : dict, optional
+            ``{design_column_index: value}`` overrides for the evaluation point.
+        dummy : bool, default ``False``
+            Treat binary regressors with a discrete difference.
+        count : bool, default ``False``
+            Treat integer-valued regressors with a discrete difference.
 
         Returns
         -------
         MarginalEffects
-            Container with point estimates, standard errors, z-statistics, and
-            p-values. ``.to_dataframe()`` returns a pandas table.
+            Has ``.summary()``, ``.summary_frame()``, ``.margeff``, ``.margeff_se``,
+            ``.pvalues`` (and backward-compatible ``.effects`` / ``.to_dataframe()``).
         """
-        from .effects import compute_marginal_effects
+        from .effects import get_margeff as _get_margeff
 
-        self._check_fitted()
-        if X is None:
-            # Use cached training design matrix but strip the intercept column,
-            # since `compute_marginal_effects` will re-add it via `_prepare_design_matrix`.
-            X_for_eval = self._strip_intercept_from_design(self._X_train_)
-        else:
-            X_for_eval = X
-        return compute_marginal_effects(self, X_for_eval, kind=kind, at="ame")
+        return _get_margeff(
+            self, at=at, method=method, kind=kind, atexog=atexog, dummy=dummy, count=count
+        )
 
-    def mem(self, X: Any = None, kind: str = "censored"):
-        """Marginal Effects at the Mean (MEM) with delta-method standard errors.
+    def ame(self, kind: str = "censored", method: str = "dydx", dummy: bool = False, count: bool = False):
+        """Average Marginal Effects — shorthand for ``get_margeff(at='overall')``."""
+        return self.get_margeff(at="overall", method=method, kind=kind, dummy=dummy, count=count)
 
-        The effect is evaluated once at the sample mean of the regressors. Quicker
-        than AME but interprets the "average individual" — beware if dummy
-        variables are present, the mean may correspond to no real observation.
-
-        See :meth:`ame` for parameters and return value.
-        """
-        from .effects import compute_marginal_effects
-
-        self._check_fitted()
-        if X is None:
-            X_for_eval = self._strip_intercept_from_design(self._X_train_)
-        else:
-            X_for_eval = X
-        return compute_marginal_effects(self, X_for_eval, kind=kind, at="mem")
-
-    def _strip_intercept_from_design(self, X_design: np.ndarray) -> np.ndarray:
-        """Return the original-user X (drop the intercept column if we added it)."""
-        if self.fit_intercept and self.feature_names_ and self.feature_names_[0] == "const":
-            return X_design[:, 1:]
-        return X_design
+    def mem(self, kind: str = "censored", method: str = "dydx", dummy: bool = False, count: bool = False):
+        """Marginal Effects at the Mean — shorthand for ``get_margeff(at='mean')``."""
+        return self.get_margeff(at="mean", method=method, kind=kind, dummy=dummy, count=count)
 
     def summary(self) -> str:
         """Return a multi-line text summary of the fitted model.
@@ -599,17 +577,10 @@ class CensoredRegression:
             X, fit_intercept=self.fit_intercept,
             feature_names=self._user_feature_names(),
         )
-        Xb = X_design @ self.coef_
-        sigma = self.sigma_
-        a_L = (self._left - Xb) / sigma if self._has_left else None
-        a_R = (self._right - Xb) / sigma if self._has_right else None
-        Phi_L = norm.cdf(a_L) if a_L is not None else np.zeros_like(Xb)
-        Phi_R = norm.cdf(a_R) if a_R is not None else np.ones_like(Xb)
-        return {
-            "left": Phi_L if self._has_left else np.zeros_like(Xb),
-            "interior": Phi_R - Phi_L,
-            "right": (1.0 - Phi_R) if self._has_right else np.zeros_like(Xb),
-        }
+        return _means.region_probabilities(
+            self.coef_, self.sigma_, X_design,
+            self._left, self._right, self._has_left, self._has_right,
+        )
 
     # ------------------------------------------------------------------
     # Utilities

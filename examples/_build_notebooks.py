@@ -160,20 +160,41 @@ def _build_two_sided_notebook() -> nbf.NotebookNode:
             "pd.DataFrame(proba, index=range(6)).round(3)"
         ),
         _md(
-            "## Average marginal effects (AME)\n"
+            "## Marginal effects via `get_margeff`\n"
             "\n"
-            "Latent AME equals $\\beta$ exactly. The censored AME is $\\beta$"
-            " shrunk by the probability of being interior. The truncated AME"
-            " shrinks further. Standard errors are computed via the delta method."
+            "The marginal-effects API mirrors statsmodels' `get_margeff`: one method,\n"
+            "with options for *where* to evaluate (`at`) and *what* to report\n"
+            "(`method`). The summary prints in the familiar statsmodels layout."
         ),
         _code(
-            "ame_latent    = model.ame(kind='latent').to_dataframe()\n"
-            "ame_censored  = model.ame(kind='censored').to_dataframe()\n"
-            "ame_truncated = model.ame(kind='truncated').to_dataframe()\n"
-            "\n"
-            "print('AME — latent\\n', ame_latent.round(4))\n"
-            "print('\\nAME — censored\\n', ame_censored.round(4))\n"
-            "print('\\nAME — truncated\\n', ame_truncated.round(4))"
+            "# AME = average over the sample (at='overall'); statsmodels-style summary\n"
+            "print(model.get_margeff(at='overall', method='dydx', kind='censored').summary())"
+        ),
+        _md(
+            "`at='overall'` is the AME; `at='mean'` is the marginal effect at the"
+            " mean (MEM). Below we compare the censored marginal effect across"
+            " evaluation points and against the latent effect (which equals"
+            " $\\beta$ exactly)."
+        ),
+        _code(
+            "import pandas as pd\n"
+            "summary = pd.DataFrame({\n"
+            "    'latent (=beta)':   model.get_margeff(at='overall', kind='latent').margeff,\n"
+            "    'censored AME':     model.get_margeff(at='overall', kind='censored').margeff,\n"
+            "    'censored MEM':     model.get_margeff(at='mean',    kind='censored').margeff,\n"
+            "    'truncated AME':    model.get_margeff(at='overall', kind='truncated').margeff,\n"
+            "}, index=['x1', 'x2', 'x3'])\n"
+            "summary.round(4)"
+        ),
+        _md(
+            "`method` switches between the derivative and elasticities:\n"
+            "`dydx` (derivative), `eyex` (elasticity), `dyex`/`eydx`"
+            " (semi-elasticities). Discrete regressors can be handled with"
+            " `dummy=True` (a 0->1 difference rather than a derivative)."
+        ),
+        _code(
+            "elas = model.get_margeff(at='overall', method='eyex', kind='censored')\n"
+            "elas.summary_frame().round(4)"
         ),
         _md(
             "## Likelihood-ratio test\n"
@@ -364,6 +385,74 @@ def _build_truncated_notebook() -> nbf.NotebookNode:
     return nb
 
 
+def _build_validation_notebook() -> nbf.NotebookNode:
+    nb = nbf.v4.new_notebook()
+    cells = [
+        _md(
+            "# Validation\n"
+            "\n"
+            "How do we know the estimator is correct and not 'a big pile of code that\n"
+            "returns nonsense'? Two independent checks.\n"
+            "\n"
+            "1. **Trivial limit:** with thresholds pushed beyond the data range,\n"
+            "   nothing is censored, so the censored/truncated MLE *must* reduce to\n"
+            "   ordinary least squares. We verify this against `statsmodels.OLS`.\n"
+            "2. **Reference packages:** the test suite also compares against R's\n"
+            "   `AER::tobit` and `truncreg` (run when R is available); see\n"
+            "   `tests/test_r_reference.py`."
+        ),
+        _code(
+            "import numpy as np\n"
+            "import pandas as pd\n"
+            "import statsmodels.api as sm\n"
+            "from censtrunc import CensoredRegression, TruncatedRegression\n"
+            "\n"
+            "rng = np.random.default_rng(0)\n"
+            "n = 1000\n"
+            "X = rng.normal(size=(n, 3))\n"
+            "y = 2.0 + 1.5*X[:,0] - 0.7*X[:,1] + 0.3*X[:,2] + rng.normal(scale=1.3, size=n)"
+        ),
+        _md(
+            "## No censoring $\\Rightarrow$ OLS\n"
+            "\n"
+            "We set `left=-1e6`, `right=1e6` so that no observation is censored. The"
+            " censored log-likelihood then reduces to the Gaussian log-likelihood,"
+            " whose maximiser is exactly the OLS coefficient vector."
+        ),
+        _code(
+            "ols = sm.OLS(y, sm.add_constant(X)).fit()\n"
+            "cens = CensoredRegression(left=-1e6, right=1e6).fit(X, y)\n"
+            "trunc = TruncatedRegression(left=-1e6, right=1e6).fit(X, y)\n"
+            "\n"
+            "pd.DataFrame({\n"
+            "    'OLS':            np.asarray(ols.params),\n"
+            "    'Censored MLE':   cens.coef_,\n"
+            "    'Truncated MLE':  trunc.coef_,\n"
+            "}, index=['const', 'x1', 'x2', 'x3']).round(6)"
+        ),
+        _md(
+            "The columns agree to several decimals. We can quantify the maximum"
+            " discrepancy and confirm the scale parameter and log-likelihood match"
+            " too (using the MLE scale $\\hat\\sigma = \\sqrt{\\mathrm{SSR}/n}$)."
+        ),
+        _code(
+            "ols_beta = np.asarray(ols.params)\n"
+            "print(f'max |beta_censored - beta_OLS|  = {np.max(np.abs(cens.coef_ - ols_beta)):.2e}')\n"
+            "print(f'max |beta_truncated - beta_OLS| = {np.max(np.abs(trunc.coef_ - ols_beta)):.2e}')\n"
+            "print(f'|sigma_censored - sqrt(SSR/n)|  = {abs(cens.sigma_ - np.sqrt(ols.ssr/n)):.2e}')\n"
+            "print(f'|loglik_censored - loglik_OLS|  = {abs(cens.llf_ - ols.llf):.2e}')"
+        ),
+        _md(
+            "All discrepancies are at the level of the optimiser tolerance — the"
+            " estimator behaves exactly as theory requires in the no-censoring"
+            " limit, which is strong evidence the likelihood and its optimisation"
+            " are implemented correctly."
+        ),
+    ]
+    nb["cells"] = cells
+    return nb
+
+
 def _execute_and_save(nb: nbf.NotebookNode, path: Path) -> None:
     """Execute a notebook in-place (so outputs are saved) and write to disk."""
     client = NotebookClient(nb, timeout=120, kernel_name="python3")
@@ -378,6 +467,7 @@ def main() -> int:
         "01_two_sided_censoring.ipynb": _build_two_sided_notebook,
         "02_classical_tobit_affairs.ipynb": _build_classical_tobit_notebook,
         "03_truncated_regression.ipynb": _build_truncated_notebook,
+        "04_validation.ipynb": _build_validation_notebook,
     }
     for fname, builder in builders.items():
         nb = builder()

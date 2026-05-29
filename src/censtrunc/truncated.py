@@ -23,10 +23,10 @@ from typing import Any
 
 import numpy as np
 from scipy.optimize import minimize
-from scipy.special import log_ndtr
 from scipy.stats import chi2, norm
 
 from . import _likelihood as _llf
+from . import _means
 from ._utils import _prepare_design_matrix, _prepare_y, _resolve_thresholds
 
 
@@ -90,6 +90,10 @@ class TruncatedRegression:
     _has_left: bool = field(default=False, init=False, repr=False)
     _has_right: bool = field(default=False, init=False, repr=False)
     _fitted: bool = field(default=False, init=False, repr=False)
+    _X_train_: np.ndarray = field(default=None, init=False, repr=False)  # type: ignore[assignment]
+
+    # Truncated models support only latent and truncated conditional means.
+    _valid_margeff_kinds = _means.TRUNCATED_KINDS
 
     # ------------------------------------------------------------------
     # Public API
@@ -115,6 +119,7 @@ class TruncatedRegression:
         )
         y_arr = _prepare_y(y, n_expected=X_design.shape[0])
         self.feature_names_ = columns
+        self._X_train_ = X_design
 
         # Validate that y is strictly inside the truncation interval
         if self._has_left and np.any(y_arr <= self._left):
@@ -272,6 +277,35 @@ class TruncatedRegression:
     # Prediction
     # ------------------------------------------------------------------
 
+    def get_margeff(
+        self,
+        at: str = "overall",
+        method: str = "dydx",
+        kind: str = "truncated",
+        atexog: dict | None = None,
+        dummy: bool = False,
+        count: bool = False,
+    ):
+        """Marginal effects (statsmodels-style ``get_margeff``).
+
+        For the truncated model ``kind`` may be ``'latent'`` (effect on the
+        population mean X'beta) or ``'truncated'`` (effect on E[Y | L<Y<R]).
+        See :func:`censtrunc.effects.get_margeff` for the full option reference.
+        """
+        from .effects import get_margeff as _get_margeff
+
+        return _get_margeff(
+            self, at=at, method=method, kind=kind, atexog=atexog, dummy=dummy, count=count
+        )
+
+    def ame(self, kind: str = "truncated", method: str = "dydx", dummy: bool = False, count: bool = False):
+        """Average Marginal Effects — shorthand for ``get_margeff(at='overall')``."""
+        return self.get_margeff(at="overall", method=method, kind=kind, dummy=dummy, count=count)
+
+    def mem(self, kind: str = "truncated", method: str = "dydx", dummy: bool = False, count: bool = False):
+        """Marginal Effects at the Mean — shorthand for ``get_margeff(at='mean')``."""
+        return self.get_margeff(at="mean", method=method, kind=kind, dummy=dummy, count=count)
+
     def summary(self) -> str:
         """Return a multi-line text summary of the fitted model."""
         from ._summary import format_summary_truncated
@@ -296,25 +330,18 @@ class TruncatedRegression:
             ``'truncated'`` returns ``E[Y | X, L < Y < R]``.
         """
         self._check_fitted()
+        if kind not in _means.TRUNCATED_KINDS:
+            raise ValueError(
+                f"Unknown kind: {kind!r}; expected one of {_means.TRUNCATED_KINDS}."
+            )
         X_design, _ = _prepare_design_matrix(
             X, fit_intercept=self.fit_intercept,
             feature_names=self._user_feature_names(),
         )
-        Xb = X_design @ self.coef_
-        if kind == "latent":
-            return Xb
-        if kind == "truncated":
-            sigma = self.sigma_
-            a_L = (self._left - Xb) / sigma if self._has_left else None
-            a_R = (self._right - Xb) / sigma if self._has_right else None
-            phi_L = norm.pdf(a_L) if a_L is not None else 0.0
-            phi_R = norm.pdf(a_R) if a_R is not None else 0.0
-            Phi_L = norm.cdf(a_L) if a_L is not None else 0.0
-            Phi_R = norm.cdf(a_R) if a_R is not None else 1.0
-            denom = Phi_R - Phi_L
-            denom_safe = np.where(np.abs(denom) > 1e-12, denom, 1.0)
-            return Xb + sigma * (phi_L - phi_R) / denom_safe
-        raise ValueError(f"Unknown kind: {kind!r}; expected 'latent' or 'truncated'.")
+        return _means.conditional_mean(
+            self.coef_, self.sigma_, X_design,
+            self._left, self._right, self._has_left, self._has_right, kind,
+        )
 
     # ------------------------------------------------------------------
     # Utilities

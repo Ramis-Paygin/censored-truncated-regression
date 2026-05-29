@@ -1,186 +1,291 @@
-"""Marginal effects (AME and MEM) with delta-method standard errors.
+"""Marginal effects via a single ``get_margeff`` entry point.
 
-For the censored model, three notions of marginal effect are natural, one for each
-conditional mean discussed in Hansen (2022), Section 27.3:
+The API deliberately mirrors :meth:`statsmodels.discrete.discrete_model.DiscreteResults.get_margeff`:
+one function with options selecting *where* the effect is evaluated and *what kind*
+of effect (derivative or elasticity) is reported.
 
-- ``latent``     :  d E[Y* | X] / dX_j = beta_j
-- ``censored``   :  d E[Y  | X] / dX_j = beta_j * [Phi(alpha_R) - Phi(alpha_L)]
-- ``truncated``  :  d E[Y  | X, L<Y<R] / dX_j  — see ``_truncated_marginal``
+Parameters of :func:`get_margeff`
+---------------------------------
+at : {'overall', 'mean', 'median', 'zero'}
+    Point(s) at which to evaluate the effect.
+    - ``'overall'`` — average of the per-observation effects (a.k.a. **AME**).
+    - ``'mean'``    — effect at the sample mean of the regressors (a.k.a. **MEM**).
+    - ``'median'``  — effect at the sample median of the regressors.
+    - ``'zero'``    — effect with all regressors set to zero.
+method : {'dydx', 'eyex', 'dyex', 'eydx'}
+    - ``'dydx'`` — derivative  dE[y]/dx_j.
+    - ``'eyex'`` — elasticity  (dE[y]/dx_j)(x_j / E[y]).
+    - ``'dyex'`` — semi-elasticity  (dE[y]/dx_j) x_j.
+    - ``'eydx'`` — semi-elasticity  (dE[y]/dx_j)/E[y].
+kind : {'latent', 'censored', 'truncated'}
+    Which conditional mean the effect refers to (``'censored'`` = E[Y|X] is the
+    usual choice; this dimension has no analogue in the probit case but is
+    essential for censored/truncated models).
+dummy : bool
+    If ``True``, binary (0/1) regressors are given a **discrete difference**
+    E[y | x=1] - E[y | x=0] instead of a derivative.
+count : bool
+    If ``True``, integer-valued regressors are given a discrete difference
+    E[y | x = round(x)+1] - E[y | x = round(x)].
+atexog : dict or None
+    Optional ``{design_column_index: value}`` overrides for the evaluation point.
 
-For each effect, the package returns:
-
-- **AME** (Average Marginal Effect): the effect evaluated at each observation in
-  the training sample, then averaged.
-- **MEM** (Marginal Effect at the Mean): the effect evaluated once at the sample
-  mean of the regressors.
-
-Standard errors are computed by the delta method: if ``g(theta)`` is the marginal
-effect and ``Var(theta_hat)`` the parameter covariance, then
-``Var(g) ~= (dg/dtheta)' Var(theta_hat) (dg/dtheta)``. We use numerical gradients
-to avoid lengthy closed-form derivatives for the censored/truncated cases.
+Standard errors are obtained by the delta method with a numerical Jacobian, which
+handles all four ``method`` choices and the discrete-difference cases uniformly.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from scipy.stats import norm
 
+from . import _means
+
 if TYPE_CHECKING:
     from .censored import CensoredRegression
+
+_METHOD_LABELS = {"dydx": "dy/dx", "eyex": "eyex", "dyex": "dyex", "eydx": "eydx"}
+_VALID_AT = ("overall", "mean", "median", "zero")
+_VALID_METHOD = ("dydx", "eyex", "dyex", "eydx")
 
 
 @dataclass
 class MarginalEffects:
-    """Container for marginal-effect estimates.
+    """Marginal-effects results, mirroring statsmodels' margins object.
 
     Attributes
     ----------
-    effects : ndarray of shape (k,)
-        Point estimates of the marginal effect for each slope coefficient
-        (excluding the intercept).
-    se : ndarray of shape (k,)
+    margeff : ndarray
+        Point estimates of the marginal effect for each slope regressor.
+    margeff_se : ndarray
         Delta-method standard errors.
-    z_values : ndarray
-        ``effects / se``.
-    p_values : ndarray
-        Two-sided Wald p-values.
+    tvalues, pvalues : ndarray
+        Wald z-statistics and two-sided p-values.
     names : list of str
-        Names of the corresponding variables.
-    kind : str
-        One of ``'latent'``, ``'censored'``, ``'truncated'``.
-    at : str
-        One of ``'ame'``, ``'mem'``.
+        Regressor names (slopes only; the intercept has no marginal effect).
+    at, method, kind : str
+        The options used to compute the effects.
+    model_name : str
+        Name of the originating model class (for the summary header).
+
+    Notes
+    -----
+    Backward-compatible aliases ``effects`` and ``se`` are provided.
     """
 
-    effects: np.ndarray
-    se: np.ndarray
-    z_values: np.ndarray
-    p_values: np.ndarray
+    margeff: np.ndarray
+    margeff_se: np.ndarray
+    tvalues: np.ndarray
+    pvalues: np.ndarray
     names: list[str]
-    kind: str
     at: str
+    method: str
+    kind: str
+    model_name: str = "Censored Regression"
 
-    def to_dataframe(self):
-        """Return a pandas DataFrame view (requires pandas)."""
+    # ---- backward-compatible aliases -------------------------------------
+    @property
+    def effects(self) -> np.ndarray:
+        return self.margeff
+
+    @property
+    def se(self) -> np.ndarray:
+        return self.margeff_se
+
+    @property
+    def z_values(self) -> np.ndarray:
+        return self.tvalues
+
+    @property
+    def p_values(self) -> np.ndarray:
+        return self.pvalues
+
+    # ---- views -----------------------------------------------------------
+    def conf_int(self, alpha: float = 0.05) -> np.ndarray:
+        z = norm.ppf(1 - alpha / 2)
+        return np.column_stack(
+            [self.margeff - z * self.margeff_se, self.margeff + z * self.margeff_se]
+        )
+
+    def summary_frame(self, alpha: float = 0.05):
+        """Return a pandas DataFrame of the marginal effects."""
         import pandas as pd
 
-        z_crit = norm.ppf(0.975)
+        ci = self.conf_int(alpha)
+        label = _METHOD_LABELS[self.method]
         return pd.DataFrame(
             {
-                "dy/dx": self.effects,
-                "std err": self.se,
-                "z": self.z_values,
-                "P>|z|": self.p_values,
-                "[0.025": self.effects - z_crit * self.se,
-                "0.975]": self.effects + z_crit * self.se,
+                label: self.margeff,
+                "std err": self.margeff_se,
+                "z": self.tvalues,
+                "P>|z|": self.pvalues,
+                "[0.025": ci[:, 0],
+                "0.975]": ci[:, 1],
             },
             index=self.names,
         )
 
+    # legacy name kept so older example code / tests keep working
+    def to_dataframe(self, alpha: float = 0.05):
+        return self.summary_frame(alpha)
+
+    def summary(self, alpha: float = 0.05) -> str:
+        """Text summary in the style of statsmodels' marginal-effects table."""
+        label = _METHOD_LABELS[self.method]
+        ci = self.conf_int(alpha)
+        title = f"{self.model_name} Marginal Effects"
+        head = [
+            f"{title:^78}",
+            "=" * 37,
+            f"{'Dep. Variable:':<20}{'y':>17}",
+            f"{'Method:':<20}{self.method:>17}",
+            f"{'At:':<20}{self.at:>17}",
+            "=" * 78,
+            f"{'':<14}{label:>10}{'std err':>11}{'z':>11}{'P>|z|':>11}{'[0.025':>11}{'0.975]':>11}",
+            "-" * 78,
+        ]
+        rows = [
+            f"{nm:<14}{m:>10.4f}{s:>11.3f}{t:>11.3f}{p:>11.3f}{lo:>11.3f}{hi:>11.3f}"
+            for nm, m, s, t, p, (lo, hi) in zip(
+                self.names, self.margeff, self.margeff_se, self.tvalues, self.pvalues, ci
+            )
+        ]
+        return "\n".join(head + rows + ["=" * 78])
+
+    def __str__(self) -> str:  # pragma: no cover - cosmetic
+        return self.summary()
+
 
 # ----------------------------------------------------------------------
-# Censored-regression marginal effects
+# Internal helpers
 # ----------------------------------------------------------------------
 
 
-def _slope_indices(model: "CensoredRegression") -> tuple[np.ndarray, list[str]]:
-    """Indices of slope coefficients in ``params_`` (excluding sigma and intercept)
-    and their human-readable names."""
-    # params_ = [sigma, beta_0, beta_1, ...]; beta_0 corresponds to feature_names_[0].
+def _slope_indices(model: "CensoredRegression") -> tuple[np.ndarray, np.ndarray, list[str]]:
+    """Return (param indices, design-column indices, names) for slope regressors.
+
+    ``params_ = [sigma, beta_0, beta_1, ...]``; design columns line up with
+    ``feature_names_``. The intercept (if present) is excluded.
+    """
     names = list(model.feature_names_)
-    # Drop intercept if present
     if model.fit_intercept and names and names[0] == "const":
         slope_names = names[1:]
-        slope_offsets = np.arange(2, 2 + len(slope_names))  # skip sigma (0) and intercept (1)
+        col_idx = np.arange(1, 1 + len(slope_names))  # design columns (skip const at 0)
+        param_idx = np.arange(2, 2 + len(slope_names))  # params (skip sigma at 0, const at 1)
     else:
         slope_names = names
-        slope_offsets = np.arange(1, 1 + len(slope_names))
-    return slope_offsets, slope_names
+        col_idx = np.arange(0, len(slope_names))
+        param_idx = np.arange(1, 1 + len(slope_names))
+    return param_idx, col_idx, slope_names
 
 
-def _design_matrix_for_eval(model: "CensoredRegression", X: np.ndarray | None) -> np.ndarray:
-    """Build the design matrix at which marginal effects are evaluated."""
-    from ._utils import _prepare_design_matrix  # local import to avoid cycle
+def _eval_rows(model: "CensoredRegression", at: str, atexog: dict | None) -> np.ndarray:
+    """Construct the design rows at which to evaluate effects."""
+    X = model._X_train_  # cached at fit time  # type: ignore[attr-defined]
+    if at == "overall":
+        rows = X.copy()
+    elif at == "mean":
+        rows = X.mean(axis=0, keepdims=True)
+    elif at == "median":
+        rows = np.median(X, axis=0, keepdims=True)
+    elif at == "zero":
+        rows = np.zeros((1, X.shape[1]))
+    else:
+        raise ValueError(f"Unknown at: {at!r}; expected one of {_VALID_AT}.")
+    if atexog:
+        rows = rows.copy()
+        for col, val in atexog.items():
+            rows[:, col] = val
+    return rows
 
-    if X is None:
-        raise ValueError("X must be supplied for marginal effects.")
-    X_design, _ = _prepare_design_matrix(
-        X,
-        fit_intercept=model.fit_intercept,
-        feature_names=model._user_feature_names(),  # type: ignore[attr-defined]
-    )
-    return X_design
+
+def _detect_discrete_columns(
+    X: np.ndarray, col_idx: np.ndarray, dummy: bool, count: bool
+) -> dict[int, str]:
+    """Map design-column index -> 'dummy' or 'count' for discrete regressors."""
+    discrete: dict[int, str] = {}
+    for col in col_idx:
+        values = X[:, col]
+        uniq = np.unique(values)
+        if dummy and set(uniq.tolist()).issubset({0.0, 1.0}):
+            discrete[int(col)] = "dummy"
+        elif count and np.allclose(values, np.round(values)):
+            discrete[int(col)] = "count"
+    return discrete
 
 
-def _marginal_effect_value(
+def _margeff_vector(
     params: np.ndarray,
-    X_rows: np.ndarray,
-    left: float,
-    right: float,
-    has_left: bool,
-    has_right: bool,
+    rows: np.ndarray,
+    model: "CensoredRegression",
+    param_idx: np.ndarray,
+    col_idx: np.ndarray,
     kind: str,
-    slope_idx_in_params: np.ndarray,
-    n_features_with_intercept: int,
+    method: str,
+    discrete: dict[int, str],
 ) -> np.ndarray:
-    """Compute marginal effects for each slope at a set of evaluation rows.
+    """Compute the aggregated marginal-effect vector as a function of ``params``.
 
-    The output is an averaged-over-rows vector (length k), so this function works
-    for both AME (rows = all training X) and MEM (rows = mean row).
+    Written so that a numerical Jacobian over ``params`` yields delta-method SEs.
     """
     sigma = params[0]
-    beta = params[1 : n_features_with_intercept + 1]
-    Xb = X_rows @ beta  # length m
+    beta = params[1:]
+    slope_beta = params[param_idx]  # coefficients of the slope regressors
+    left, right = model._left, model._right  # type: ignore[attr-defined]
+    has_left, has_right = model._has_left, model._has_right  # type: ignore[attr-defined]
 
-    if kind == "latent":
-        # ME = beta_j for each slope; broadcast to (m, k) then mean -> (k,)
-        slope_beta = beta[slope_idx_in_params - 1]  # offset by 1 (params[0] is sigma)
-        return np.broadcast_to(slope_beta, (X_rows.shape[0], slope_beta.shape[0])).mean(axis=0)
+    # base derivative effects (n_rows, k_slopes)
+    effect = _means.dmean_dx(
+        beta, sigma, rows, left, right, has_left, has_right, kind, slope_beta
+    )
 
-    a_L = (left - Xb) / sigma if has_left else None
-    a_R = (right - Xb) / sigma if has_right else None
-    Phi_L = norm.cdf(a_L) if a_L is not None else np.zeros_like(Xb)
-    Phi_R = norm.cdf(a_R) if a_R is not None else np.ones_like(Xb)
+    # override discrete columns with finite differences
+    if discrete:
+        for local_j, col in enumerate(col_idx):
+            mode = discrete.get(int(col))
+            if mode is None:
+                continue
+            rows_hi = rows.copy()
+            rows_lo = rows.copy()
+            if mode == "dummy":
+                rows_hi[:, col] = 1.0
+                rows_lo[:, col] = 0.0
+            else:  # count
+                base = np.round(rows[:, col])
+                rows_hi[:, col] = base + 1.0
+                rows_lo[:, col] = base
+            m_hi = _means.conditional_mean(
+                beta, sigma, rows_hi, left, right, has_left, has_right, kind
+            )
+            m_lo = _means.conditional_mean(
+                beta, sigma, rows_lo, left, right, has_left, has_right, kind
+            )
+            effect[:, local_j] = m_hi - m_lo
 
-    if kind == "censored":
-        scale = Phi_R - Phi_L  # (m,)
-        slope_beta = beta[slope_idx_in_params - 1]  # (k,)
-        # ME_{m,k} = beta_k * scale_m
-        ME = np.outer(scale, slope_beta)  # (m, k)
-        return ME.mean(axis=0)
-
-    if kind == "truncated":
-        phi_L = norm.pdf(a_L) if a_L is not None else np.zeros_like(Xb)
-        phi_R = norm.pdf(a_R) if a_R is not None else np.zeros_like(Xb)
-        denom = Phi_R - Phi_L
-        denom_safe = np.where(np.abs(denom) > 1e-12, denom, 1.0)
-        # d E[Y | L<Y<R] / dX_j = beta_j * [ 1 - (alpha_R * phi_R - alpha_L * phi_L) / denom
-        #                                    - ((phi_L - phi_R) / denom)^2 ]
-        term_alpha_phi = (
-            (a_R * phi_R if a_R is not None else 0.0)
-            - (a_L * phi_L if a_L is not None else 0.0)
+    # elasticity / semi-elasticity transforms
+    if method != "dydx":
+        ypred = _means.conditional_mean(
+            beta, sigma, rows, left, right, has_left, has_right, kind
         )
-        mills_sq = ((phi_L - phi_R) / denom_safe) ** 2
-        adjustment = 1.0 - term_alpha_phi / denom_safe - mills_sq  # (m,)
-        slope_beta = beta[slope_idx_in_params - 1]
-        ME = np.outer(adjustment, slope_beta)
-        return ME.mean(axis=0)
+        xvals = rows[:, col_idx]  # (n_rows, k)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            if method == "eyex":
+                effect = effect * xvals / ypred[:, None]
+            elif method == "dyex":
+                effect = effect * xvals
+            elif method == "eydx":
+                effect = effect / ypred[:, None]
+            else:  # pragma: no cover
+                raise ValueError(f"Unknown method: {method!r}")
 
-    raise ValueError(f"Unknown kind: {kind!r}")
+    return effect.mean(axis=0)
 
 
-def _delta_method_se(
-    f: callable,  # type: ignore[valid-type]
-    params: np.ndarray,
-    cov: np.ndarray,
-) -> np.ndarray:
-    """Delta-method standard errors for a vector-valued function ``f(params)``.
-
-    Uses central finite differences for the Jacobian.
-    """
+def _delta_method_se(f: Any, params: np.ndarray, cov: np.ndarray) -> np.ndarray:
+    """Delta-method SEs for a vector function via central finite differences."""
     base = f(params)
     n_params = params.shape[0]
     n_out = base.shape[0]
@@ -188,76 +293,61 @@ def _delta_method_se(
     step = np.sqrt(np.finfo(float).eps)
     h = step * np.maximum(np.abs(params), 1.0)
     for p in range(n_params):
-        x_p = params.copy(); x_p[p] += h[p]
-        x_m = params.copy(); x_m[p] -= h[p]
-        J[:, p] = (f(x_p) - f(x_m)) / (2 * h[p])
+        xp = params.copy(); xp[p] += h[p]
+        xm = params.copy(); xm[p] -= h[p]
+        J[:, p] = (f(xp) - f(xm)) / (2 * h[p])
     var = np.einsum("ip,pq,iq->i", J, cov, J)
     return np.sqrt(np.maximum(var, 0.0))
 
 
-# ----------------------------------------------------------------------
-# Public API attached as methods to CensoredRegression
-# ----------------------------------------------------------------------
-
-
-def compute_marginal_effects(
+def get_margeff(
     model: "CensoredRegression",
-    X_eval: np.ndarray | None,
-    kind: str,
-    at: str,
+    at: str = "overall",
+    method: str = "dydx",
+    kind: str = "censored",
+    atexog: dict | None = None,
+    dummy: bool = False,
+    count: bool = False,
 ) -> MarginalEffects:
-    """Compute AME or MEM for a fitted CensoredRegression.
+    """Compute marginal effects for a fitted censored/truncated model.
 
-    Parameters
-    ----------
-    model : CensoredRegression
-        A fitted model.
-    X_eval : array-like or None
-        Sample of regressors at which to evaluate. If ``None``, this function
-        cannot proceed (no training X is cached); pass the training matrix
-        (or any sample of interest) explicitly.
-    kind : {'latent', 'censored', 'truncated'}
-    at : {'ame', 'mem'}
+    See the module docstring for the meaning of each option.
     """
     model._check_fitted()  # type: ignore[attr-defined]
+    if at not in _VALID_AT:
+        raise ValueError(f"Unknown at: {at!r}; expected one of {_VALID_AT}.")
+    if method not in _VALID_METHOD:
+        raise ValueError(f"Unknown method: {method!r}; expected one of {_VALID_METHOD}.")
+    valid_kinds = getattr(model, "_valid_margeff_kinds", _means.CENSORED_KINDS)
+    if kind not in valid_kinds:
+        raise ValueError(f"Unknown kind: {kind!r}; expected one of {valid_kinds}.")
 
-    X_design = _design_matrix_for_eval(model, X_eval)
-    slope_idx, slope_names = _slope_indices(model)
+    param_idx, col_idx, slope_names = _slope_indices(model)
     if not slope_names:
-        raise ValueError("Model has no slope coefficients (intercept-only); marginal effects are empty.")
+        raise ValueError("Model has no slope coefficients; marginal effects are empty.")
 
-    if at == "ame":
-        rows = X_design
-    elif at == "mem":
-        rows = X_design.mean(axis=0, keepdims=True)
-    else:
-        raise ValueError(f"Unknown 'at': {at!r}; expected 'ame' or 'mem'.")
-
-    n_features_with_intercept = X_design.shape[1]
+    rows = _eval_rows(model, at, atexog)
+    discrete = _detect_discrete_columns(model._X_train_, col_idx, dummy, count)  # type: ignore[attr-defined]
 
     def f(params: np.ndarray) -> np.ndarray:
-        return _marginal_effect_value(
-            params,
-            rows,
-            left=model._left,  # type: ignore[attr-defined]
-            right=model._right,  # type: ignore[attr-defined]
-            has_left=model._has_left,  # type: ignore[attr-defined]
-            has_right=model._has_right,  # type: ignore[attr-defined]
-            kind=kind,
-            slope_idx_in_params=slope_idx,
-            n_features_with_intercept=n_features_with_intercept,
+        return _margeff_vector(
+            params, rows, model, param_idx, col_idx, kind, method, discrete
         )
 
     effects = f(model.params_)
     se = _delta_method_se(f, model.params_, model.cov_params_)
-    z = effects / se
+    with np.errstate(divide="ignore", invalid="ignore"):
+        z = np.where(se > 0, effects / se, np.nan)
     p = 2.0 * (1.0 - norm.cdf(np.abs(z)))
+
     return MarginalEffects(
-        effects=effects,
-        se=se,
-        z_values=z,
-        p_values=p,
+        margeff=effects,
+        margeff_se=se,
+        tvalues=z,
+        pvalues=p,
         names=slope_names,
-        kind=kind,
         at=at,
+        method=method,
+        kind=kind,
+        model_name=type(model).__name__.replace("Regression", " Regression"),
     )

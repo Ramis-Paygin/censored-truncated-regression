@@ -19,7 +19,7 @@ Quickstart
 from __future__ import annotations
 
 from .censored import CensoredRegression
-from .effects import MarginalEffects
+from .effects import MarginalEffects, get_margeff
 from .inference import LRTestResult, lr_test
 from .truncated import TruncatedRegression
 
@@ -27,6 +27,7 @@ __all__ = [
     "CensoredRegression",
     "TruncatedRegression",
     "MarginalEffects",
+    "get_margeff",
     "LRTestResult",
     "lr_test",
     "__version__",

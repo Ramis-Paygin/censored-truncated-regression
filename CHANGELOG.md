@@ -14,8 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   regression with arbitrary `left` and `right` thresholds.
 - Three prediction modes — `latent`, `censored`, `truncated` — plus
   `predict_proba` returning region probabilities.
-- Average Marginal Effects (`ame`) and Marginal Effects at the Mean (`mem`)
-  with delta-method standard errors for all prediction modes.
+- Marginal effects through a single `get_margeff` method with an API mirroring
+  statsmodels (`at` ∈ {overall, mean, median, zero}; `method` ∈ {dydx, eyex,
+  dyex, eydx}; `dummy`/`count` for discrete regressors), with delta-method
+  standard errors, a statsmodels-style `summary()`, and a `summary_frame()`.
+  `ame()` / `mem()` remain as shorthands for `at='overall'` / `at='mean'`.
+- Validation tests: in the no-censoring limit the estimator reproduces OLS
+  (coefficients, MLE scale, and log-likelihood) to optimiser tolerance, checked
+  against `statsmodels.OLS`; an optional comparison against R's `AER::tobit`
+  and `truncreg` runs when R is available (`tests/test_r_reference.py`).
+- Shared conditional-mean module (`_means.py`) used by both `predict` and the
+  marginal-effects machinery, keeping predictions and effects consistent.
 - Likelihood-ratio test (`lr_test`) for arbitrary nested models, plus an
   overall LR test against the intercept-only null model included in every
   fitted-model summary.
