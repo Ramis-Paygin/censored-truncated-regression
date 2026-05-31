@@ -81,7 +81,10 @@ $$f(y_i \mid L < Y_i^* < R) = \frac{\sigma^{-1}\,\phi((y_i - X_i'\beta)/\sigma)}
   (`method='dydx'` derivative, or `'eyex'`/`'dyex'`/`'eydx'` elasticities), with
   discrete-variable handling (`dummy=True`) and **delta-method standard errors**.
   `ame()` and `mem()` are provided as convenient shorthands.
-- **Likelihood-ratio test** (`lr_test`) for any pair of nested models.
+- **Likelihood-ratio test** (`lr_test`) for any pair of nested models, plus
+  `model.lr_test(hypotheses)` for linear restrictions specified as a
+  statsmodels-style hypothesis string (`'(x1 = 0), (x2 = x3)'`,
+  `'2*x1 + x4 = 1'`, ...) or as `(R, r)` arrays.
 - **statsmodels-style `summary()`** with coefficient table, Wald confidence
   intervals, AIC/BIC, McFadden's pseudo-$R^2$, overall LR test, and per-region
   censoring counts.
@@ -183,13 +186,26 @@ mean (`latent`, `censored`, `truncated`) or a **region probability**
 
 ### Likelihood-ratio test
 
+Two equivalent routes:
+
 ```python
+# 1) Two fitted models (any nested pair)
 from censtrunc import lr_test
 full = CensoredRegression(left=0.0, right=2.5).fit(X, y)
 restricted = CensoredRegression(left=0.0, right=2.5).fit(X[:, :2], y)
-result = lr_test(full, restricted)
-print(result)        # statistic, df, p-value, log-likelihoods
+print(lr_test(full, restricted))
+
+# 2) One model + a statsmodels-style hypothesis string (`f_test` syntax)
+print(full.lr_test('x3 = 0'))                       # single restriction
+print(full.lr_test('(x2 = 0), (x3 = 0)'))           # joint restriction
+print(full.lr_test('x1 - 2*x2 = 0'))                # composite / arithmetic
+print(full.lr_test((R, r)))                         # raw (R, r) arrays
 ```
+
+Route 2 refits the model under the linear constraint $R\hat\theta = r$ via
+`scipy.optimize` with `LinearConstraint`, then reports
+$LR = 2(\ell_{\text{full}} - \ell_{\text{rest.}})\sim \chi^2_q$ where $q$ is
+the number of restrictions.
 
 ## API at a glance
 
@@ -198,6 +214,7 @@ print(result)        # statistic, df, p-value, log-likelihoods
 | `CensoredRegression`         | Tobit-style estimator with arbitrary `left, right`   |
 | `TruncatedRegression`        | Truncated normal regression                          |
 | `lr_test(full, restricted)`  | Likelihood-ratio test between two nested models      |
+| `model.lr_test(hypotheses)`  | LR test for linear restrictions (`'x1 = 0, x2 = x3'`) |
 | `MarginalEffects`            | Returned by `.ame()` / `.mem()`; has `.to_dataframe()` |
 | `LRTestResult`               | Returned by `lr_test`                                 |
 
@@ -271,6 +288,30 @@ The test suite covers:
 - Input validation (NaN handling, threshold ordering, etc.).
 - Monte Carlo (marked `slow`) confirming approximate unbiasedness over 60
   repetitions.
+
+## Notes on `marginaleffects`
+
+The Python [`marginaleffects`](https://marginaleffects.com/) package is a
+general-purpose toolkit for predictions, comparisons, slopes, and hypothesis
+tests across many model backends. We considered providing a direct adapter
+but decided **not** to ship one. The reasoning:
+
+- `marginaleffects` requires a backend-specific subclass of an internal
+  `ModelAbstract` that exposes a `vault` (named pandas coefficients, a
+  formula, polars data, formula-engine metadata) and overrides `get_predict`,
+  `get_exog`, `get_vcov`. A working adapter would couple `censtrunc` to those
+  private internals and would need ongoing maintenance.
+- Our `get_margeff` already mirrors the design (one method, options) and
+  covers the standard slopes use cases (`dydx`, elasticities, AME/MEM,
+  delta-method SEs, hypothesis tests for linear restrictions). It additionally
+  exposes Tobit-specific quantities — `kind` ∈ {`latent`, `censored`,
+  `truncated`, `prob-left`, `prob-interior`, `prob-right`} — that
+  `marginaleffects` does not natively understand (it would only see one
+  default prediction).
+- For users who want `marginaleffects`-style diagnostic plots, the recommended
+  workflow is to fit a parallel OLS on the same data via `statsmodels` and use
+  `marginaleffects.slopes` on it for visualisation, while reporting the
+  unbiased Tobit marginal effects from `censtrunc.get_margeff`.
 
 ## References
 

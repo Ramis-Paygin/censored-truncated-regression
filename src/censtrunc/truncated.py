@@ -91,6 +91,7 @@ class TruncatedRegression:
     _has_right: bool = field(default=False, init=False, repr=False)
     _fitted: bool = field(default=False, init=False, repr=False)
     _X_train_: np.ndarray = field(default=None, init=False, repr=False)  # type: ignore[assignment]
+    _y_train_: np.ndarray = field(default=None, init=False, repr=False)  # type: ignore[assignment]
 
     # Truncated models support only latent and truncated conditional means.
     _valid_margeff_kinds = _means.TRUNCATED_KINDS
@@ -120,6 +121,7 @@ class TruncatedRegression:
         y_arr = _prepare_y(y, n_expected=X_design.shape[0])
         self.feature_names_ = columns
         self._X_train_ = X_design
+        self._y_train_ = y_arr
 
         # Validate that y is strictly inside the truncation interval
         if self._has_left and np.any(y_arr <= self._left):
@@ -305,6 +307,105 @@ class TruncatedRegression:
     def mem(self, kind: str = "truncated", method: str = "dydx", dummy: bool = False, count: bool = False):
         """Marginal Effects at the Mean — shorthand for ``get_margeff(at='mean')``."""
         return self.get_margeff(at="mean", method=method, kind=kind, dummy=dummy, count=count)
+
+    # ------------------------------------------------------------------
+    # LR test from linear restrictions (statsmodels-style hypothesis strings)
+    # ------------------------------------------------------------------
+
+    def lr_test(self, hypotheses):
+        """Likelihood-ratio test for linear restrictions on this truncated model.
+
+        Same API as :meth:`CensoredRegression.lr_test`. See its docstring for
+        accepted hypothesis formats.
+        """
+        from ._restrictions import parse_hypotheses
+        from .inference import LRTestResult
+
+        self._check_fitted()
+        param_names = ["sigma"] + list(self.feature_names_)
+        R, r = parse_hypotheses(hypotheses, param_names)
+        if R.shape[0] >= self.params_.shape[0]:
+            raise ValueError(
+                f"Too many restrictions ({R.shape[0]}) for a {self.params_.shape[0]}-parameter model"
+            )
+        restricted_llf = self._fit_restricted_loglik(R, r)
+        stat = 2.0 * (float(self.llf_) - float(restricted_llf))
+        if stat < 0:
+            import warnings
+
+            warnings.warn(
+                f"LR statistic is negative ({stat:.3g}); restricted MLE likely did not converge "
+                "to a true constrained optimum.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        df = int(R.shape[0])
+        p_value = float(chi2.sf(max(stat, 0.0), df))
+        return LRTestResult(
+            statistic=stat,
+            df=df,
+            p_value=p_value,
+            ll_full=float(self.llf_),
+            ll_restricted=float(restricted_llf),
+            n_obs=int(self.n_obs_),
+        )
+
+    def _fit_restricted_loglik(self, R: np.ndarray, r: np.ndarray) -> float:
+        """Maximise the truncated log-likelihood subject to ``R @ params == r``."""
+        from scipy.optimize import LinearConstraint, minimize
+
+        theta0 = self.params_.copy()
+        residual = r - R @ theta0
+        theta_start = theta0 + np.linalg.pinv(R) @ residual
+        if theta_start[0] <= 1e-6:
+            from scipy.linalg import null_space
+
+            N = null_space(R)
+            if N.shape[1] > 0:
+                k = int(np.argmax(np.abs(N[0])))
+                if abs(N[0, k]) > 1e-10:
+                    step = (max(self.sigma_, 1e-3) - theta_start[0]) / N[0, k]
+                    theta_start = theta_start + step * N[:, k]
+            if theta_start[0] <= 1e-6:
+                theta_start[0] = max(self.sigma_, 1e-3)
+
+        bounds = [(1e-8, None)] + [(None, None)] * (theta_start.shape[0] - 1)
+        constraint = LinearConstraint(R, r, r)
+        args = (
+            self._X_train_,
+            self._y_train_,
+            self._left,
+            self._right,
+            self._has_left,
+            self._has_right,
+        )
+        import warnings as _warnings
+
+        with _warnings.catch_warnings():
+            _warnings.filterwarnings(
+                "ignore",
+                message="delta_grad == 0.0",
+                category=UserWarning,
+                module=r"scipy\.optimize\._differentiable_functions",
+            )
+            res = minimize(
+                fun=_llf.neg_loglik_truncated,
+                x0=theta_start,
+                args=args,
+                method="trust-constr",
+                bounds=bounds,
+                constraints=[constraint],
+                options={"maxiter": max(self.max_iter, 500), "xtol": self.tol, "verbose": 0},
+            )
+        if not res.success:
+            import warnings
+
+            warnings.warn(
+                f"Restricted MLE did not converge cleanly: {res.message}",
+                RuntimeWarning,
+                stacklevel=3,
+            )
+        return -float(res.fun)
 
     def summary(self) -> str:
         """Return a multi-line text summary of the fitted model."""

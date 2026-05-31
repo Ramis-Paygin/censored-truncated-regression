@@ -238,6 +238,34 @@ def _build_two_sided_notebook() -> nbf.NotebookNode:
             " Here `x3` has a true coefficient of 0.2 and a large sample, so the"
             " test correctly rejects."
         ),
+        _md(
+            "### LR test from a hypothesis string\n"
+            "\n"
+            "Re-fitting a restricted model by hand is fine for simple drop-a-column"
+            " cases, but cumbersome for joint or composite restrictions. For those,"
+            " `model.lr_test(hypotheses)` mirrors statsmodels' `f_test` and accepts"
+            " linear restrictions directly as a string — single, joint, or with"
+            " arithmetic on parameter names."
+        ),
+        _code(
+            "# Drop a single regressor (same null as the two-model test above)\n"
+            "print(model.lr_test('x3 = 0'))"
+        ),
+        _code(
+            "# Joint restriction: x2 AND x3 are zero (composite null)\n"
+            "print(model.lr_test('(x2 = 0), (x3 = 0)'))"
+        ),
+        _code(
+            "# Composite restriction with arithmetic: x1 - 2*x2 = 0\n"
+            "# (equivalent to testing whether x1 equals twice x2)\n"
+            "print(model.lr_test('x1 - 2*x2 = 0'))"
+        ),
+        _md(
+            "Each call refits the model under the linear constraint $R\\hat\\theta = r$"
+            " (via `scipy.optimize` with `LinearConstraint`) and reports the"
+            " asymptotic LR statistic $2(\\ell_{\\text{full}} - \\ell_{\\text{rest.}})"
+            "\\sim \\chi^2_q$."
+        ),
     ]
     nb["cells"] = cells
     return nb

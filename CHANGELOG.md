@@ -29,9 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `truncreg` runs when R is available (`tests/test_r_reference.py`).
 - Shared conditional-mean module (`_means.py`) used by both `predict` and the
   marginal-effects machinery, keeping predictions and effects consistent.
-- Likelihood-ratio test (`lr_test`) for arbitrary nested models, plus an
-  overall LR test against the intercept-only null model included in every
-  fitted-model summary.
+- Likelihood-ratio test in two equivalent forms:
+  - `lr_test(full, restricted)` for any pair of fitted nested models;
+  - `model.lr_test(hypotheses)` for linear restrictions specified as a
+    statsmodels-style hypothesis string
+    (e.g. `'(x1 = 0), (x2 - x3 = 0.5)'`) or as `(R, r)` arrays.
+  Plus an overall LR test against the intercept-only null model included in
+  every fitted-model summary.
 - statsmodels-style `summary()` with coefficient table, Wald inference,
   AIC/BIC, McFadden's pseudo-R², and per-region censoring counts.
 - Three executed example notebooks in `examples/`:

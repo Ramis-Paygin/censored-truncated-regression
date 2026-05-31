@@ -126,6 +126,10 @@ class CensoredRegression:
     feature_names_: list[str] = field(default_factory=list, init=False, repr=False)
     diagnostics_: _FitDiagnostics | None = field(default=None, init=False, repr=False)
     _X_train_: np.ndarray = field(default=None, init=False, repr=False)  # type: ignore[assignment]
+    _y_train_: np.ndarray = field(default=None, init=False, repr=False)  # type: ignore[assignment]
+    _mask_left_: np.ndarray = field(default=None, init=False, repr=False)  # type: ignore[assignment]
+    _mask_right_: np.ndarray = field(default=None, init=False, repr=False)  # type: ignore[assignment]
+    _mask_free_: np.ndarray = field(default=None, init=False, repr=False)  # type: ignore[assignment]
     _left: float = field(default=-np.inf, init=False, repr=False)
     _right: float = field(default=np.inf, init=False, repr=False)
     _has_left: bool = field(default=False, init=False, repr=False)
@@ -255,6 +259,10 @@ class CensoredRegression:
         self.n_uncensored_ = int(mask_free.sum())
         # Cache the training design matrix for default AME computation
         self._X_train_ = X_design
+        self._y_train_ = y_arr
+        self._mask_left_ = mask_left
+        self._mask_right_ = mask_right
+        self._mask_free_ = mask_free
         self._fitted = True
 
         # --- null model for LR test and pseudo R^2 ----------------------------
@@ -548,6 +556,137 @@ class CensoredRegression:
     def mem(self, kind: str = "censored", method: str = "dydx", dummy: bool = False, count: bool = False):
         """Marginal Effects at the Mean — shorthand for ``get_margeff(at='mean')``."""
         return self.get_margeff(at="mean", method=method, kind=kind, dummy=dummy, count=count)
+
+    # ------------------------------------------------------------------
+    # LR test from linear restrictions (statsmodels-style hypothesis strings)
+    # ------------------------------------------------------------------
+
+    def lr_test(self, hypotheses):
+        """Likelihood-ratio test for linear restrictions on this model.
+
+        The API mirrors :meth:`statsmodels.regression.linear_model.OLSResults.f_test`
+        in input form, but the returned statistic is the asymptotic LR
+        ``2*(loglik_full - loglik_restricted) ~ chi^2_q`` rather than the
+        finite-sample F.
+
+        Parameters
+        ----------
+        hypotheses : str | array | tuple
+            Linear restrictions in one of three forms:
+
+            - **String** — comma-separated constraints (parentheses optional)
+              referring to parameter names (``'sigma'``, ``'const'``, and the
+              regressor names). Examples::
+
+                  '(x1 = 0)'
+                  '(x1 = 0), (x2 = x3)'
+                  '(2*x1 + x2/10 = 1), (x3 - x4 = 0)'
+
+            - **(q, p) array** — interpreted as ``R`` with RHS ``r = 0``.
+            - **Tuple ``(R, r)``** — used directly; ``r`` may be a scalar.
+
+        Returns
+        -------
+        :class:`~censtrunc.inference.LRTestResult`
+        """
+        from ._restrictions import parse_hypotheses
+        from .inference import LRTestResult
+
+        self._check_fitted()
+        param_names = ["sigma"] + list(self.feature_names_)
+        R, r = parse_hypotheses(hypotheses, param_names)
+        if R.shape[0] >= self.params_.shape[0]:
+            raise ValueError(
+                f"Too many restrictions ({R.shape[0]}) for a {self.params_.shape[0]}-parameter model"
+            )
+        restricted_llf = self._fit_restricted_loglik(R, r)
+        stat = 2.0 * (float(self.llf_) - float(restricted_llf))
+        if stat < 0:
+            import warnings
+
+            warnings.warn(
+                f"LR statistic is negative ({stat:.3g}); restricted MLE likely did not converge "
+                "to a true constrained optimum.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        df = int(R.shape[0])
+        p_value = float(chi2.sf(max(stat, 0.0), df))
+        return LRTestResult(
+            statistic=stat,
+            df=df,
+            p_value=p_value,
+            ll_full=float(self.llf_),
+            ll_restricted=float(restricted_llf),
+            n_obs=int(self.n_obs_),
+        )
+
+    def _fit_restricted_loglik(self, R: np.ndarray, r: np.ndarray) -> float:
+        """Maximise the log-likelihood subject to ``R @ params == r``."""
+        from scipy.optimize import LinearConstraint, minimize
+
+        # Starting point: project the unrestricted MLE onto the constraint hyperplane.
+        theta0 = self.params_.copy()
+        residual = r - R @ theta0
+        theta_start = theta0 + np.linalg.pinv(R) @ residual
+
+        # If the projection pushes sigma <= 0, slide along the null space of R
+        # to find a feasible sigma without leaving the constraint surface.
+        if theta_start[0] <= 1e-6:
+            from scipy.linalg import null_space
+
+            N = null_space(R)
+            if N.shape[1] > 0:
+                # pick the null-space direction with largest |component on sigma|
+                k = int(np.argmax(np.abs(N[0])))
+                if abs(N[0, k]) > 1e-10:
+                    step = (max(self.sigma_, 1e-3) - theta_start[0]) / N[0, k]
+                    theta_start = theta_start + step * N[:, k]
+            if theta_start[0] <= 1e-6:
+                theta_start[0] = max(self.sigma_, 1e-3)
+
+        bounds = [(1e-8, None)] + [(None, None)] * (theta_start.shape[0] - 1)
+        constraint = LinearConstraint(R, r, r)
+
+        args = (
+            self._X_train_,
+            self._y_train_,
+            self._left,
+            self._right,
+            self._mask_left_,
+            self._mask_right_,
+            self._mask_free_,
+        )
+        import warnings as _warnings
+
+        with _warnings.catch_warnings():
+            # trust-constr's quasi-Newton Hessian update emits a benign
+            # "delta_grad == 0.0" UserWarning when an intermediate step is
+            # locally linear; suppress it so the user-visible output stays clean.
+            _warnings.filterwarnings(
+                "ignore",
+                message="delta_grad == 0.0",
+                category=UserWarning,
+                module=r"scipy\.optimize\._differentiable_functions",
+            )
+            res = minimize(
+                fun=_llf.neg_loglik_censored,
+                x0=theta_start,
+                args=args,
+                method="trust-constr",
+                bounds=bounds,
+                constraints=[constraint],
+                options={"maxiter": max(self.max_iter, 500), "xtol": self.tol, "verbose": 0},
+            )
+        if not res.success:
+            import warnings
+
+            warnings.warn(
+                f"Restricted MLE did not converge cleanly: {res.message}",
+                RuntimeWarning,
+                stacklevel=3,
+            )
+        return -float(res.fun)
 
     def summary(self) -> str:
         """Return a multi-line text summary of the fitted model.
