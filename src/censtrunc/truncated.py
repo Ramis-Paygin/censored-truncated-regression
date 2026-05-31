@@ -419,30 +419,34 @@ class TruncatedRegression:
             return self.summary()
         return f"TruncatedRegression(left={self.left!r}, right={self.right!r}, fit_intercept={self.fit_intercept!r}) [not fitted]"
 
-    def predict(self, X: Any, kind: str = "truncated") -> np.ndarray:
-        """Predict conditional expectations for the truncated model.
+    def predict(self, X: Any, kind: str | None = None) -> Any:
+        """Predict conditional means for the truncated model.
 
         Parameters
         ----------
         X : array-like
             New design matrix.
-        kind : {'latent', 'truncated'}, default ``'truncated'``
-            ``'latent'`` returns ``X'beta`` (the untruncated population mean).
-            ``'truncated'`` returns ``E[Y | X, L < Y < R]``.
+        kind : str or None, default ``None``
+            Two flavours are available for the truncated model:
+
+            =====  =====================  ===============================================
+            Code   Quantity                Formula
+            =====  =====================  ===============================================
+            ``h``  hidden / latent mean    ``E[Y* | X] = X'beta``
+            ``t``  truncated mean          ``E[Y  | X, L<Y<R] = X'beta + sigma [phi(alpha_L) - phi(alpha_R)] / [Phi(alpha_R) - Phi(alpha_L)]``
+            =====  =====================  ===============================================
+
+            - ``None`` returns both columns as a pandas ``DataFrame``.
+            - A letter string (``'h'``, ``'t'``, ``'ht'``): one or multiple columns.
+            - Full kind names (``'latent'``, ``'truncated'``) remain valid for
+              backward compatibility and return a 1-D ``ndarray``.
         """
         self._check_fitted()
-        if kind not in _means.TRUNCATED_KINDS:
-            raise ValueError(
-                f"Unknown kind: {kind!r}; expected one of {_means.TRUNCATED_KINDS}."
-            )
         X_design, _ = _prepare_design_matrix(
             X, fit_intercept=self.fit_intercept,
             feature_names=self._user_feature_names(),
         )
-        return _means.conditional_mean(
-            self.coef_, self.sigma_, X_design,
-            self._left, self._right, self._has_left, self._has_right, kind,
-        )
+        return _means.dispatch_predict(self, X_design, kind, default=_means.ALL_LETTERS_TRUNCATED)
 
     # ------------------------------------------------------------------
     # Utilities

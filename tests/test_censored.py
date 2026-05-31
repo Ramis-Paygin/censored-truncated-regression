@@ -143,6 +143,89 @@ def test_predict_unfitted_raises(sim_two_sided):
 
 
 # ----------------------------------------------------------------------
+# Letter-string predict() API
+# ----------------------------------------------------------------------
+
+
+def test_predict_default_returns_all_six_columns(sim_two_sided):
+    import pandas as pd
+
+    model = CensoredRegression(left=sim_two_sided.left, right=sim_two_sided.right).fit(
+        sim_two_sided.X, sim_two_sided.y
+    )
+    out = model.predict(sim_two_sided.X[:10])  # no kind argument
+    assert isinstance(out, pd.DataFrame)
+    expected = ["latent", "censored", "truncated", "prob_left", "prob_interior", "prob_right"]
+    assert list(out.columns) == expected
+    assert out.shape == (10, 6)
+
+
+def test_predict_hctlmr_equals_default(sim_two_sided):
+    model = CensoredRegression(left=sim_two_sided.left, right=sim_two_sided.right).fit(
+        sim_two_sided.X, sim_two_sided.y
+    )
+    a = model.predict(sim_two_sided.X[:5])
+    b = model.predict(sim_two_sided.X[:5], kind="hctlmr")
+    import pandas as pd
+    pd.testing.assert_frame_equal(a, b)
+
+
+def test_predict_lmr_three_probabilities_sum_to_one(sim_two_sided):
+    model = CensoredRegression(left=sim_two_sided.left, right=sim_two_sided.right).fit(
+        sim_two_sided.X, sim_two_sided.y
+    )
+    out = model.predict(sim_two_sided.X[:50], kind="lmr")
+    assert list(out.columns) == ["prob_left", "prob_interior", "prob_right"]
+    total = out["prob_left"] + out["prob_interior"] + out["prob_right"]
+    np.testing.assert_allclose(total.to_numpy(), 1.0, atol=1e-12)
+
+
+def test_predict_single_letter_returns_1d_ndarray(sim_two_sided):
+    model = CensoredRegression(left=sim_two_sided.left, right=sim_two_sided.right).fit(
+        sim_two_sided.X, sim_two_sided.y
+    )
+    out = model.predict(sim_two_sided.X[:5], kind="h")
+    assert isinstance(out, np.ndarray)
+    assert out.ndim == 1
+
+
+def test_predict_h_matches_latent_backward_compat(sim_two_sided):
+    model = CensoredRegression(left=sim_two_sided.left, right=sim_two_sided.right).fit(
+        sim_two_sided.X, sim_two_sided.y
+    )
+    np.testing.assert_allclose(
+        model.predict(sim_two_sided.X[:20], kind="h"),
+        model.predict(sim_two_sided.X[:20], kind="latent"),
+    )
+
+
+def test_predict_letter_order_preserved(sim_two_sided):
+    """The output columns should appear in the order the user requested."""
+    model = CensoredRegression(left=sim_two_sided.left, right=sim_two_sided.right).fit(
+        sim_two_sided.X, sim_two_sided.y
+    )
+    out = model.predict(sim_two_sided.X[:5], kind="rml")
+    assert list(out.columns) == ["prob_right", "prob_interior", "prob_left"]
+
+
+def test_predict_invalid_letter_raises(sim_two_sided):
+    model = CensoredRegression(left=sim_two_sided.left, right=sim_two_sided.right).fit(
+        sim_two_sided.X, sim_two_sided.y
+    )
+    with pytest.raises(ValueError, match="Unknown kind letter"):
+        model.predict(sim_two_sided.X[:5], kind="hxyz")
+
+
+def test_predict_duplicate_letters_deduplicated(sim_two_sided):
+    model = CensoredRegression(left=sim_two_sided.left, right=sim_two_sided.right).fit(
+        sim_two_sided.X, sim_two_sided.y
+    )
+    out = model.predict(sim_two_sided.X[:5], kind="hhhh")
+    # one letter de-duplicates to a single column -> 1-D ndarray
+    assert isinstance(out, np.ndarray) and out.ndim == 1
+
+
+# ----------------------------------------------------------------------
 # Input validation
 # ----------------------------------------------------------------------
 

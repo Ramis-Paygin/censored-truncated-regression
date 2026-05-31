@@ -28,6 +28,102 @@ TRUNCATED_KINDS = ("latent", "truncated")
 PROB_KINDS = ("prob-left", "prob-interior", "prob-right")
 MARGEFF_CENSORED_KINDS = CENSORED_KINDS + PROB_KINDS
 
+# Compact single-letter aliases for predict(): h/c/t for the three conditional
+# means, l/m/r for the three region probabilities. Output column labels are
+# the more readable underscore_separated names.
+LETTER_TO_KIND = {
+    "h": "latent",
+    "c": "censored",
+    "t": "truncated",
+    "l": "prob-left",
+    "m": "prob-interior",
+    "r": "prob-right",
+}
+LETTER_TO_COLUMN = {
+    "h": "latent",
+    "c": "censored",
+    "t": "truncated",
+    "l": "prob_left",
+    "m": "prob_interior",
+    "r": "prob_right",
+}
+ALL_LETTERS_CENSORED = "hctlmr"   # default for CensoredRegression
+ALL_LETTERS_TRUNCATED = "ht"      # default for TruncatedRegression
+
+
+def dispatch_predict(model, X_design: np.ndarray, kind: str | None, default: str):
+    """Shared ``predict()`` dispatcher for both model classes.
+
+    Handles three input modes for ``kind``:
+
+    1. ``None`` -> expand to ``default`` (a letter string).
+    2. A *long* kind name (``'latent'``, ``'censored'``, ``'truncated'``,
+       ``'prob-left'``, ...) -> return a 1-D ``ndarray``. Kept for backward
+       compatibility.
+    3. A *letter* string (any subset of ``'hctlmr'``). One letter -> 1-D array;
+       multiple letters -> ``pandas.DataFrame`` (or a 2-D ``ndarray`` if pandas
+       is not installed).
+    """
+    valid_kinds = getattr(model, "_valid_margeff_kinds", MARGEFF_CENSORED_KINDS)
+    valid_letters = {ltr for ltr in default}
+
+    # Long-name backward-compat path
+    if isinstance(kind, str) and kind in MARGEFF_CENSORED_KINDS:
+        if kind not in valid_kinds:
+            raise ValueError(
+                f"kind={kind!r} is not available for {type(model).__name__}; "
+                f"valid kinds: {valid_kinds}"
+            )
+        return value_for_kind(
+            model.coef_, model.sigma_, X_design,
+            model._left, model._right, model._has_left, model._has_right, kind,
+        )
+
+    if kind is None:
+        kind = default
+
+    if not isinstance(kind, str):
+        raise TypeError(f"kind must be a string or None; got {type(kind).__name__}")
+    if not kind:
+        raise ValueError("kind is empty")
+
+    unknown = [c for c in kind if c not in LETTER_TO_KIND]
+    if unknown:
+        raise ValueError(
+            f"Unknown kind letter(s): {unknown}; valid letters: {sorted(LETTER_TO_KIND)}"
+        )
+    unavailable = [c for c in kind if c not in valid_letters]
+    if unavailable:
+        raise ValueError(
+            f"kind letter(s) {unavailable} not available for {type(model).__name__}; "
+            f"valid for this model: {sorted(valid_letters)}"
+        )
+
+    # De-duplicate while preserving order.
+    seen: set[str] = set()
+    ordered = [c for c in kind if not (c in seen or seen.add(c))]
+
+    if len(ordered) == 1:
+        return value_for_kind(
+            model.coef_, model.sigma_, X_design,
+            model._left, model._right, model._has_left, model._has_right,
+            LETTER_TO_KIND[ordered[0]],
+        )
+
+    cols: dict[str, np.ndarray] = {}
+    for c in ordered:
+        cols[LETTER_TO_COLUMN[c]] = value_for_kind(
+            model.coef_, model.sigma_, X_design,
+            model._left, model._right, model._has_left, model._has_right,
+            LETTER_TO_KIND[c],
+        )
+    try:
+        import pandas as pd
+
+        return pd.DataFrame(cols)
+    except ImportError:  # pragma: no cover
+        return np.column_stack(list(cols.values()))
+
 
 def _alphas(
     mu: np.ndarray,

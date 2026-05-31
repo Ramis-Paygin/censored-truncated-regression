@@ -478,31 +478,49 @@ class CensoredRegression:
     # Prediction
     # ------------------------------------------------------------------
 
-    def predict(self, X: Any, kind: str = "censored") -> np.ndarray:
-        """Predict conditional expectations.
+    def predict(self, X: Any, kind: str | None = None) -> Any:
+        """Predict conditional means and/or region probabilities.
+
+        Six quantities can be produced; each has a one-letter code that may be
+        combined (in any order, repeats ignored) to request several columns at
+        once. With ``mu = X'beta``, ``alpha_L = (L - mu)/sigma``, and
+        ``alpha_R = (R - mu)/sigma``:
+
+        =====  ============================  ==============================================
+        Code   Quantity                       Formula
+        =====  ============================  ==============================================
+        ``h``  hidden / latent mean           ``E[Y* | X] = mu``
+        ``c``  censored conditional mean      ``E[Y  | X] = L Phi(alpha_L) + R [1 - Phi(alpha_R)] + mu [Phi(alpha_R) - Phi(alpha_L)] + sigma [phi(alpha_L) - phi(alpha_R)]``
+        ``t``  truncated conditional mean     ``E[Y  | X, L<Y<R] = mu + sigma [phi(alpha_L) - phi(alpha_R)] / [Phi(alpha_R) - Phi(alpha_L)]``
+        ``l``  left-region probability        ``P(Y = L | X) = Phi(alpha_L)``
+        ``m``  middle-region probability      ``P(L < Y < R | X) = Phi(alpha_R) - Phi(alpha_L)``
+        ``r``  right-region probability       ``P(Y = R | X) = 1 - Phi(alpha_R)``
+        =====  ============================  ==============================================
 
         Parameters
         ----------
         X : array-like of shape (m, k)
             New design matrix (same convention as in ``fit``).
-        kind : {'latent', 'censored', 'truncated'}, default ``'censored'``
-            - ``'latent'`` returns ``X'beta`` (uncensored mean).
-            - ``'censored'`` returns ``E[Y | X]`` accounting for the threshold mass.
-            - ``'truncated'`` returns ``E[Y | X, L < Y < R]`` (mean over the interior).
+        kind : str or None, default ``None``
+            - ``None`` returns all six columns (= ``'hctlmr'``).
+            - A letter string (any subset of ``'hctlmr'``): one or more columns.
+              A single letter returns a 1-D ``ndarray``; multiple letters return
+              a pandas ``DataFrame`` whose columns are
+              ``['latent', 'censored', 'truncated', 'prob_left', 'prob_interior', 'prob_right']``
+              in the order requested.
+            - A full kind name (``'latent'`` / ``'censored'`` / ``'truncated'``):
+              returns a 1-D ``ndarray`` (kept for backward compatibility).
+
+        Returns
+        -------
+        ndarray or pandas.DataFrame
         """
         self._check_fitted()
-        if kind not in _means.CENSORED_KINDS:
-            raise ValueError(
-                f"Unknown kind: {kind!r}; expected one of {_means.CENSORED_KINDS}."
-            )
         X_design, _ = _prepare_design_matrix(
             X, fit_intercept=self.fit_intercept,
             feature_names=self._user_feature_names(),
         )
-        return _means.conditional_mean(
-            self.coef_, self.sigma_, X_design,
-            self._left, self._right, self._has_left, self._has_right, kind,
-        )
+        return _means.dispatch_predict(self, X_design, kind, default=_means.ALL_LETTERS_CENSORED)
 
     # Which conditional means / probabilities support marginal effects
     # (see effects.get_margeff): the three means plus the three region

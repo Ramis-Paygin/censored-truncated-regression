@@ -45,3 +45,26 @@ def test_truncated_predict_inside_interval(sim_truncated):
     assert y_lat.shape == (50,)
     # truncated mean must lie strictly inside the interval
     assert np.all((y_trunc > sim_truncated.left) & (y_trunc < sim_truncated.right))
+
+
+def test_truncated_predict_default_two_columns(sim_truncated):
+    import pandas as pd
+
+    model = TruncatedRegression(left=sim_truncated.left, right=sim_truncated.right).fit(
+        sim_truncated.X, sim_truncated.y
+    )
+    out = model.predict(sim_truncated.X[:10])
+    assert isinstance(out, pd.DataFrame)
+    assert list(out.columns) == ["latent", "truncated"]
+
+
+def test_truncated_predict_rejects_prob_letters(sim_truncated):
+    """Probability kinds make no sense for a truncated model -> ValueError."""
+    import pytest
+
+    model = TruncatedRegression(left=sim_truncated.left, right=sim_truncated.right).fit(
+        sim_truncated.X, sim_truncated.y
+    )
+    for bad in ("l", "lmr", "ht l".replace(" ", ""), "c"):
+        with pytest.raises(ValueError, match="not available"):
+            model.predict(sim_truncated.X[:5], kind=bad)

@@ -17,7 +17,7 @@ model = CensoredRegression(left=0.0, right=2.5).fit(X, y)
 print(model.summary())                       # full coefficient table
 ame  = model.ame(kind="censored").to_dataframe()
 mem  = model.mem(kind="censored").to_dataframe()
-preds = model.predict(X_new, kind="censored")  # E[Y | X]
+preds = model.predict(X_new)                   # DataFrame of all 6 quantities
 restricted = CensoredRegression(left=0, right=2.5).fit(X[:, :2], y)
 lr_test(model, restricted)
 ```
@@ -67,14 +67,31 @@ probability of being in the interval:
 $$f(y_i \mid L < Y_i^* < R) = \frac{\sigma^{-1}\,\phi((y_i - X_i'\beta)/\sigma)}
                                 {\Phi((R - X_i'\beta)/\sigma) - \Phi((L - X_i'\beta)/\sigma)}.$$
 
+**Six predicted quantities.** With $\mu = X'\beta$, $\alpha_L = (L - \mu)/\sigma$,
+and $\alpha_R = (R - \mu)/\sigma$:
+
+| code | quantity | formula |
+|------|----------|---------|
+| `h`  | hidden / latent mean      | $\mathbb E[Y^* \mid X] = \mu$ |
+| `c`  | censored conditional mean | $\mathbb E[Y \mid X] = L\,\Phi(\alpha_L) + R\,[1{-}\Phi(\alpha_R)] + \mu\,[\Phi(\alpha_R){-}\Phi(\alpha_L)] + \sigma\,[\phi(\alpha_L){-}\phi(\alpha_R)]$ |
+| `t`  | truncated conditional mean | $\mathbb E[Y \mid X, L{<}Y{<}R] = \mu + \sigma\,\dfrac{\phi(\alpha_L) - \phi(\alpha_R)}{\Phi(\alpha_R) - \Phi(\alpha_L)}$ |
+| `l`  | left-region probability    | $P(Y = L \mid X) = \Phi(\alpha_L)$ |
+| `m`  | middle-region probability  | $P(L < Y < R \mid X) = \Phi(\alpha_R) - \Phi(\alpha_L)$ |
+| `r`  | right-region probability   | $P(Y = R \mid X) = 1 - \Phi(\alpha_R)$ |
+
+For the truncated model only `h` and `t` are defined (no mass piles up at the
+thresholds and no observations are reported there).
+
 ## Features
 
 - **Censored regression** with arbitrary `left` / `right` thresholds (either
   may be `None` for one-sided censoring).
 - **Truncated regression** with arbitrary thresholds.
-- Three flavours of prediction: `latent` ($X'\beta$), `censored` ($\mathbb E[Y\mid X]$),
-  and `truncated` ($\mathbb E[Y\mid X, L<Y<R]$); plus `predict_proba` returning
-  region probabilities.
+- A unified `predict()` that returns any combination of **six** quantities —
+  three conditional means and three region probabilities — selected via a
+  compact one-letter `kind` argument (e.g. `kind='hctlmr'` for all six,
+  `kind='lmr'` for just the probabilities, `kind='h'` for the latent mean).
+  Long names (`'latent'`, `'censored'`, `'truncated'`) remain valid.
 - **Marginal effects** via a single `get_margeff` method whose API mirrors
   statsmodels' `get_margeff`: choose *where* to evaluate (`at='overall'` = AME,
   `at='mean'` = MEM, plus `'median'`/`'zero'`) and *what* to report
@@ -125,6 +142,16 @@ y = np.clip(y_star, 0.0, 2.5)   # two-sided clipping
 model = CensoredRegression(left=0.0, right=2.5).fit(X, y)
 print(model.summary())
 print("β̂ =", model.coef_, "σ̂ =", model.sigma_)
+
+# All six predicted quantities at once
+preds = model.predict(X[:5])
+#        latent  censored  truncated  prob_left  prob_interior  prob_right
+print(preds.round(3))
+
+# Just the censored mean (1-D ndarray, backward-compatible)
+y_hat = model.predict(X[:5], kind="censored")     # same as kind="c"
+# Just the three region probabilities (DataFrame, sums to 1 per row)
+probs = model.predict(X[:5], kind="lmr")
 ```
 
 ### Classical Tobit (left-only)

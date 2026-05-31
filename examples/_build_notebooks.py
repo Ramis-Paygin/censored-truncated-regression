@@ -133,31 +133,37 @@ def _build_two_sided_notebook() -> nbf.NotebookNode:
             "comparison.round(4)"
         ),
         _md(
-            "## Predictions: the three flavours\n"
+            "## Predictions: six quantities, one call\n"
             "\n"
-            "- `latent`: $\\mathbb E[Y^* | X] = X'\\beta$\n"
-            "- `censored`: $\\mathbb E[Y | X]$ — accounts for the threshold mass\n"
-            "- `truncated`: $\\mathbb E[Y | X, L < Y < R]$ — conditional on being interior"
+            "`model.predict(X)` returns a dataframe with all six quantities — three"
+            " conditional means and three region probabilities. Each column has a"
+            " one-letter mnemonic:\n"
+            "\n"
+            "- `h` — *hidden* / latent mean $\\mathbb E[Y^* \\mid X] = X'\\beta$\n"
+            "- `c` — *censored* mean $\\mathbb E[Y \\mid X]$\n"
+            "- `t` — *truncated* mean $\\mathbb E[Y \\mid X, L<Y<R]$\n"
+            "- `l` — left-region probability $P(Y=L \\mid X) = \\Phi(\\alpha_L)$\n"
+            "- `m` — middle probability $P(L<Y<R \\mid X) = \\Phi(\\alpha_R) - \\Phi(\\alpha_L)$\n"
+            "- `r` — right-region probability $P(Y=R \\mid X) = 1 - \\Phi(\\alpha_R)$"
         ),
         _code(
             "X_show = X[:6]\n"
-            "preds = pd.DataFrame({\n"
-            "    'latent':    model.predict(X_show, kind='latent'),\n"
-            "    'censored':  model.predict(X_show, kind='censored'),\n"
-            "    'truncated': model.predict(X_show, kind='truncated'),\n"
-            "    'observed':  y[:6],\n"
-            "})\n"
-            "preds.round(3)"
+            "model.predict(X_show).round(3)   # default = all six columns"
         ),
         _md(
-            "## Probabilities of each region\n"
-            "\n"
-            "`predict_proba` returns the conditional probability of each region"
-            " given $X$. The three probabilities sum to 1 by construction."
+            "Subsets are selected with the same letter codes. For example, just the"
+            " three probabilities (note that each row sums to one) or just the"
+            " hidden mean (a 1-D array):"
         ),
         _code(
-            "proba = model.predict_proba(X_show)\n"
-            "pd.DataFrame(proba, index=range(6)).round(3)"
+            "model.predict(X_show, kind='lmr').round(3)"
+        ),
+        _code(
+            "model.predict(X_show, kind='h')          # single letter -> 1-D ndarray"
+        ),
+        _md(
+            "Long names — `kind='latent'`, `'censored'`, `'truncated'` — remain"
+            " valid and return 1-D arrays for backward compatibility."
         ),
         _md(
             "## Marginal effects via `get_margeff`\n"
@@ -421,18 +427,17 @@ def _build_truncated_notebook() -> nbf.NotebookNode:
         _md(
             "## Predictions\n"
             "\n"
-            "Two prediction kinds are available for the truncated model:\n"
+            "For the truncated model only two prediction quantities are meaningful"
+            " (there is no mass at the thresholds, so the region-probability"
+            " columns do not apply):\n"
             "\n"
-            "- `latent`: $X'\\hat\\beta$ — the population mean\n"
-            "- `truncated`: $\\mathbb E[Y | X, L < Y < R]$"
+            "- `h` (`latent`): $X'\\hat\\beta$ — the population mean\n"
+            "- `t` (`truncated`): $\\mathbb E[Y | X, L < Y < R]$"
         ),
         _code(
-            "preds = pd.DataFrame({\n"
-            "    'observed':  y[:6],\n"
-            "    'latent':    model.predict(X[:6], kind='latent'),\n"
-            "    'truncated': model.predict(X[:6], kind='truncated'),\n"
-            "}).round(3)\n"
-            "preds"
+            "preds = model.predict(X[:6])      # default = 'ht' -> both columns\n"
+            "preds.insert(0, 'observed', y[:6])\n"
+            "preds.round(3)"
         ),
     ]
     nb["cells"] = cells

@@ -12,8 +12,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with arbitrary `left` and `right` thresholds (generalised Type-1 Tobit).
 - `TruncatedRegression`: maximum-likelihood estimator for truncated normal
   regression with arbitrary `left` and `right` thresholds.
-- Three prediction modes — `latent`, `censored`, `truncated` — plus
-  `predict_proba` returning region probabilities.
+- A unified `predict()` that returns any combination of **six** quantities
+  via a compact one-letter ``kind`` argument:
+
+      h = hidden (latent) mean,        l = P(Y = L | X),
+      c = censored conditional mean,   m = P(L < Y < R | X),
+      t = truncated conditional mean,  r = P(Y = R | X).
+
+  ``predict(X)`` (no ``kind``) returns a ``pandas.DataFrame`` with all six
+  columns; ``predict(X, kind='lmr')`` returns only the three probabilities;
+  ``predict(X, kind='h')`` returns a 1-D ``ndarray``. Long names
+  (``'latent'``, ``'censored'``, ``'truncated'``) remain valid and continue to
+  return 1-D arrays. The truncated model exposes only the ``h`` and ``t``
+  quantities (default ``'ht'``). ``predict_proba`` is still available for the
+  legacy dict-of-arrays interface.
 - Marginal effects through a single `get_margeff` method with an API mirroring
   statsmodels (`at` ∈ {overall, mean, median, zero}; `method` ∈ {dydx, eyex,
   dyex, eydx}; `dummy`/`count` for discrete regressors), with delta-method
