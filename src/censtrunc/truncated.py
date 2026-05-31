@@ -92,6 +92,7 @@ class TruncatedRegression:
     _fitted: bool = field(default=False, init=False, repr=False)
     _X_train_: np.ndarray = field(default=None, init=False, repr=False)  # type: ignore[assignment]
     _y_train_: np.ndarray = field(default=None, init=False, repr=False)  # type: ignore[assignment]
+    _pending_formula_data: Any = field(default=None, init=False, repr=False)
 
     # Truncated models support only latent and truncated conditional means.
     _valid_margeff_kinds = _means.TRUNCATED_KINDS
@@ -102,11 +103,27 @@ class TruncatedRegression:
 
     def fit(
         self,
-        X: Any,
-        y: Any,
+        X: Any | None = None,
+        y: Any | None = None,
         feature_names: list[str] | None = None,
     ) -> "TruncatedRegression":
-        """Estimate the truncated regression by maximum likelihood."""
+        """Estimate the truncated regression by maximum likelihood.
+
+        Supports both ``model.fit(X, y)`` and ``Model.from_formula(...).fit()``
+        — see :meth:`from_formula` for the formula style.
+        """
+        if X is None and y is None:
+            if self._pending_formula_data is None:
+                raise ValueError(
+                    "Either pass (X, y) explicitly or build via "
+                    "TruncatedRegression.from_formula(formula, data) first."
+                )
+            y, X, _y_name, x_names = self._pending_formula_data
+            self._pending_formula_data = None
+            self.fit_intercept = False
+            feature_names = x_names
+        elif X is None or y is None:
+            raise ValueError("Both X and y must be supplied")
         if self.left is None and self.right is None:
             raise ValueError(
                 "Truncated regression requires at least one of `left` or `right` to be set."
@@ -278,6 +295,31 @@ class TruncatedRegression:
     # ------------------------------------------------------------------
     # Prediction
     # ------------------------------------------------------------------
+
+    @classmethod
+    def from_formula(
+        cls,
+        formula: str,
+        data: Any,
+        **init_kwargs: Any,
+    ) -> "TruncatedRegression":
+        """Build a (yet-unfitted) truncated model from a patsy formula and data.
+
+        See :meth:`CensoredRegression.from_formula` for details. Example::
+
+            TruncatedRegression.from_formula(
+                'lwage ~ 1 + educ + exper + expersq',
+                data=mroz.dropna(subset=['lwage']),
+                left=thresh,
+            ).fit()
+        """
+        from ._formula import parse_single_formula
+
+        init_kwargs.pop("fit_intercept", None)
+        instance = cls(fit_intercept=False, **init_kwargs)
+        y_arr, X_arr, y_name, x_names = parse_single_formula(formula, data)
+        instance._pending_formula_data = (y_arr, X_arr, y_name, x_names)
+        return instance
 
     def get_margeff(
         self,

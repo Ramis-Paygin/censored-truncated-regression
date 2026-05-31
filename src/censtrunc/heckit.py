@@ -225,6 +225,7 @@ class HeckitRegression:
     selection_feature_names_: list[str] = field(default_factory=list, init=False, repr=False)
     converged_: bool = field(default=False, init=False, repr=False)
     _fitted: bool = field(default=False, init=False, repr=False)
+    _pending_formula_data: Any = field(default=None, init=False, repr=False)
 
     # ------------------------------------------------------------------
     # fit
@@ -232,26 +233,45 @@ class HeckitRegression:
 
     def fit(
         self,
-        y: Any,
-        X: Any,
-        Z: Any,
+        y: Any | None = None,
+        X: Any | None = None,
+        Z: Any | None = None,
         feature_names_outcome: list[str] | None = None,
         feature_names_selection: list[str] | None = None,
     ) -> "HeckitRegression":
         """Estimate the sample-selection model.
 
+        Two calling styles:
+
+        - **Explicit**: ``model.fit(y, X, Z)`` — pass arrays directly. ``NaN`` in
+          ``y`` marks unselected observations.
+        - **Formula**: ``HeckitRegression.from_formula(outcome, selection,
+          data).fit()`` — both equations specified as patsy formulas.
+
         Parameters
         ----------
         y : array-like of shape (n,)
-            Outcome variable. ``NaN`` denotes a missing (not selected)
-            observation; alternatively, supply zero/any placeholder there.
+            Outcome with ``NaN`` for unselected observations (or zero/any).
         X : array-like of shape (n, k_x)
             Outcome-equation regressors.
         Z : array-like of shape (n, k_z)
-            Selection-equation regressors. Should share rows with ``X`` and
-            ``y`` (i.e. one row per individual, with ``Z`` available for all
-            individuals and ``X``/``y`` only meaningful when selected).
+            Selection-equation regressors.
         """
+        if y is None and X is None and Z is None:
+            if self._pending_formula_data is None:
+                raise ValueError(
+                    "Either pass (y, X, Z) explicitly or use "
+                    "HeckitRegression.from_formula(outcome, selection, data) first."
+                )
+            (
+                y, X, Z,
+                feature_names_outcome,
+                feature_names_selection,
+            ) = self._pending_formula_data
+            self._pending_formula_data = None
+            self.fit_intercept = False
+        elif y is None or X is None or Z is None:
+            raise ValueError("All of y, X, Z must be supplied")
         if self.method not in ("twostep", "mle"):
             raise ValueError(f"Unknown method: {self.method!r}")
 
@@ -289,6 +309,47 @@ class HeckitRegression:
 
         self._fitted = True
         return self
+
+    @classmethod
+    def from_formula(
+        cls,
+        outcome: str,
+        selection: str,
+        data: Any,
+        **init_kwargs: Any,
+    ) -> "HeckitRegression":
+        """Build a (yet-unfitted) Heckman model from two patsy formulas.
+
+        Example::
+
+            HeckitRegression.from_formula(
+                outcome='lwage   ~ 1 + educ + exper + expersq',
+                selection='inlf  ~ 1 + educ + exper + age + kidslt6 + kidsge6',
+                data=mroz,
+            ).fit()
+
+        The left-hand side of the **selection** formula must be a binary
+        (0/1) indicator. Wherever the indicator is 0 the outcome is treated as
+        unobserved (NaN), regardless of what the outcome column contains. The
+        intercept is supplied by the formula in both equations.
+        """
+        from ._formula import parse_single_formula
+
+        init_kwargs.pop("fit_intercept", None)
+        instance = cls(fit_intercept=False, **init_kwargs)
+
+        s_arr, Z_arr, _s_name, z_names = parse_single_formula(selection, data)
+        s_arr = np.asarray(s_arr).astype(float)
+        if not np.all((s_arr == 0) | (s_arr == 1)):
+            raise ValueError(
+                f"Left-hand side of the selection formula must be binary (0/1); "
+                f"got values: {np.unique(s_arr)[:5]} ..."
+            )
+        y_arr, X_arr, _y_name, x_names = parse_single_formula(outcome, data)
+        # Mark unselected observations as NaN so the fit pipeline handles them.
+        y_arr = np.where(s_arr == 1, y_arr, np.nan)
+        instance._pending_formula_data = (y_arr, X_arr, Z_arr, x_names, z_names)
+        return instance
 
     # ------------------------------------------------------------------
     # Two-step estimator

@@ -193,6 +193,37 @@ print(twostep.summary())                # outcome + selection blocks + rho/sigma
 yhat = mle.predict(X=X_new, Z=Z_new, kind="conditional")  # E[Y | X, Z, S=1]
 ```
 
+### Patsy-style formulas
+
+Every model class accepts a `from_formula(formula, data, ...)` constructor,
+mirroring statsmodels:
+
+```python
+# Censored / truncated: one formula
+CensoredRegression.from_formula(
+    'lwage ~ 1 + educ + exper + expersq', data=mroz, left=0.0,
+).fit()
+
+TruncatedRegression.from_formula(
+    'lwage ~ 1 + educ + exper + expersq',
+    data=mroz.dropna(subset=['lwage']),
+    left=thresh,
+).fit()
+
+# Heckit: two formulas (outcome + selection); selection LHS must be binary
+HeckitRegression.from_formula(
+    outcome   = 'lwage ~ 1 + educ + exper + expersq',
+    selection = 'inlf  ~ 1 + educ + exper + age + kidslt6 + kidsge6',
+    data=mroz,
+    method='twostep',
+).fit()
+```
+
+Patsy transforms (`np.log(x)`, `I(x**2)`, `C(z)` for categorical contrasts,
+`x1:x2` interactions) all work because the formula is parsed by `patsy` before
+the model sees it. The intercept is handled by the formula (`+ 1` is implicit,
+`- 1` suppresses it).
+
 ### Marginal effects (`get_margeff`)
 
 ```python

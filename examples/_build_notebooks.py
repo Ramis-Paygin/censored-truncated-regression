@@ -868,6 +868,29 @@ def _build_heckit_notebook() -> nbf.NotebookNode:
             "preds.round(3)"
         ),
         _md(
+            "## Same fit via a patsy formula\n"
+            "\n"
+            "Instead of building `y`, `X`, `Z` by hand, every model class accepts"
+            " a `from_formula(...)` constructor in the statsmodels style. For"
+            " Heckit you pass *two* formulas — outcome and selection — sharing a"
+            " single dataframe:"
+        ),
+        _code(
+            "df = pd.DataFrame({\n"
+            "    'shared': shared, 'x_only': x_only, 'z_only': z_only,\n"
+            "    'inlf':   S, 'lwage': y_full,\n"
+            "})\n"
+            "m_form = HeckitRegression.from_formula(\n"
+            "    outcome   = 'lwage ~ 1 + shared + x_only',\n"
+            "    selection = 'inlf  ~ 1 + shared + z_only',\n"
+            "    data=df, method='mle',\n"
+            ").fit()\n"
+            "print(pd.DataFrame({\n"
+            "    'beta (explicit)': m_ml.coef_,\n"
+            "    'beta (formula)':  m_form.coef_,\n"
+            "}, index=['const', 'shared', 'x_only']).round(6))"
+        ),
+        _md(
             "## Bootstrap standard errors\n"
             "\n"
             "Two-step second-stage standard errors are naive: they ignore the"

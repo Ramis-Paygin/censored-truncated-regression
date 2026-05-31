@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `bootstrap()` helper for proper two-step standard errors and a `predict()`
   with three kinds: `'outcome'` (`X'beta`), `'selection_prob'` (`Phi(Z'gamma)`),
   and `'conditional'` (`E[Y | X, Z, S=1] = X'beta + rho*sigma*lambda(Z'gamma)`).
+- ``from_formula(formula, data, ...)`` constructors on all three model classes
+  for patsy-style formula input (e.g. ``'lwage ~ 1 + educ + exper + expersq'``).
+  ``HeckitRegression.from_formula`` takes separate ``outcome`` and ``selection``
+  formulas. Patsy transforms, categorical contrasts, and the ``-1`` no-intercept
+  syntax all work.
 - A unified `predict()` that returns any combination of **six** quantities
   via a compact one-letter ``kind`` argument:
 

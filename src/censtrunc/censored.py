@@ -130,6 +130,7 @@ class CensoredRegression:
     _mask_left_: np.ndarray = field(default=None, init=False, repr=False)  # type: ignore[assignment]
     _mask_right_: np.ndarray = field(default=None, init=False, repr=False)  # type: ignore[assignment]
     _mask_free_: np.ndarray = field(default=None, init=False, repr=False)  # type: ignore[assignment]
+    _pending_formula_data: Any = field(default=None, init=False, repr=False)
     _left: float = field(default=-np.inf, init=False, repr=False)
     _right: float = field(default=np.inf, init=False, repr=False)
     _has_left: bool = field(default=False, init=False, repr=False)
@@ -142,32 +143,89 @@ class CensoredRegression:
 
     def fit(
         self,
-        X: Any,
-        y: Any,
+        X: Any | None = None,
+        y: Any | None = None,
         feature_names: list[str] | None = None,
     ) -> "CensoredRegression":
         """Estimate the model parameters by maximum likelihood.
 
+        Two calling styles are supported:
+
+        - **Explicit data**: ``model.fit(X, y)`` — provide the design matrix and
+          response directly.
+        - **Formula style**: ``CensoredRegression.from_formula('y ~ x1 + x2',
+          data=df, left=0).fit()`` — the formula and data are stashed by
+          :meth:`from_formula` and consumed here.
+
         Parameters
         ----------
-        X : array-like of shape (n, k)
-            Design matrix of regressors. If ``fit_intercept`` is ``True`` an
-            intercept column is prepended automatically.
-        y : array-like of shape (n,)
-            Observed (possibly censored) dependent variable. Values must lie in
-            the closed interval ``[left, right]``; values at the thresholds are
-            treated as censored observations.
+        X : array-like of shape (n, k), optional
+            Design matrix. If ``fit_intercept`` is ``True`` an intercept column
+            is prepended automatically. Omit when calling after
+            :meth:`from_formula`.
+        y : array-like of shape (n,), optional
+            Observed (possibly censored) dependent variable. Values at the
+            thresholds are treated as censored observations.
         feature_names : list of str, optional
-            Names of the regressor columns. If ``X`` is a pandas DataFrame the
-            column names are used automatically; this argument lets callers
-            override them or supply names for plain numpy input.
+            Names of the regressor columns. Inferred from a DataFrame if
+            possible.
 
         Returns
         -------
         self : CensoredRegression
-            The fitted estimator (allowing ``model.fit(X, y).predict(X_new)``).
+            The fitted estimator (allowing chained calls like
+            ``model.fit(X, y).predict(X_new)``).
         """
+        if X is None and y is None:
+            if self._pending_formula_data is None:
+                raise ValueError(
+                    "Either pass (X, y) explicitly or build via "
+                    "CensoredRegression.from_formula(formula, data) first."
+                )
+            y, X, _y_name, x_names = self._pending_formula_data
+            self._pending_formula_data = None
+            self.fit_intercept = False  # patsy already includes the intercept
+            return self._fit(X, y, feature_names=x_names, refit_null=True)
+        if X is None or y is None:
+            raise ValueError("Both X and y must be supplied; got X=%r, y=%r" % (X, y))
         return self._fit(X, y, feature_names=feature_names, refit_null=True)
+
+    @classmethod
+    def from_formula(
+        cls,
+        formula: str,
+        data: Any,
+        **init_kwargs: Any,
+    ) -> "CensoredRegression":
+        """Build a (yet-unfitted) model from a patsy formula and a dataframe.
+
+        Mirrors the statsmodels pattern::
+
+            model = CensoredRegression.from_formula(
+                'lwage ~ 1 + educ + exper', data=mroz, left=0,
+            ).fit()
+
+        The intercept is handled by the formula (``+ 1`` is implicit unless you
+        write ``- 1``); ``fit_intercept`` on the returned instance is forced to
+        ``False`` so we do not add a second constant column.
+
+        Parameters
+        ----------
+        formula : str
+            Patsy/R-style formula such as ``'y ~ x1 + np.log(x2) + I(x3**2)'``.
+        data : pandas.DataFrame or compatible mapping
+            Source of the columns referenced in the formula.
+        **init_kwargs
+            Forwarded to ``CensoredRegression(...)`` (``left``, ``right``,
+            ``method``, ...). ``fit_intercept`` is ignored.
+        """
+        from ._formula import parse_single_formula
+
+        init_kwargs.pop("fit_intercept", None)
+        instance = cls(fit_intercept=False, **init_kwargs)
+        y_arr, X_arr, y_name, x_names = parse_single_formula(formula, data)
+        instance._pending_formula_data = (y_arr, X_arr, y_name, x_names)
+        return instance
 
     def _fit(
         self,

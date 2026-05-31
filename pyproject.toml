@@ -39,6 +39,7 @@ classifiers = [
 dependencies = [
     "numpy>=1.24",
     "scipy>=1.10",
+    "patsy>=0.5",   # patsy-style formulas via Model.from_formula(...)
 ]
 
 [project.optional-dependencies]
