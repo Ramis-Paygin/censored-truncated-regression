@@ -20,12 +20,14 @@ from __future__ import annotations
 
 from .censored import CensoredRegression
 from .effects import MarginalEffects, get_margeff
+from .heckit import HeckitRegression
 from .inference import LRTestResult, lr_test
 from .truncated import TruncatedRegression
 
 __all__ = [
     "CensoredRegression",
     "TruncatedRegression",
+    "HeckitRegression",
     "MarginalEffects",
     "get_margeff",
     "LRTestResult",

@@ -87,6 +87,9 @@ thresholds and no observations are reported there).
 - **Censored regression** with arbitrary `left` / `right` thresholds (either
   may be `None` for one-sided censoring).
 - **Truncated regression** with arbitrary thresholds.
+- **Heckman sample-selection regression** (Heckit) with both the classical
+  two-step estimator and joint maximum likelihood; corrects for selection bias
+  when the outcome is observed only for a non-random subsample.
 - A unified `predict()` that returns any combination of **six** quantities —
   three conditional means and three region probabilities — selected via a
   compact one-letter `kind` argument (e.g. `kind='hctlmr'` for all six,
@@ -176,6 +179,20 @@ from censtrunc import TruncatedRegression
 model = TruncatedRegression(left=0.0, right=2.5).fit(X, y)
 ```
 
+### Heckman selection (Heckit)
+
+```python
+from censtrunc import HeckitRegression
+# y has NaN where the observation is *not selected* (e.g. wages for non-workers).
+# X = outcome-equation regressors; Z = selection-equation regressors (often
+# wider than X — it must include an "exclusion" variable that affects selection
+# but not the outcome).
+twostep = HeckitRegression(method="twostep").fit(y, X, Z)
+mle     = HeckitRegression(method="mle").fit(y, X, Z)
+print(twostep.summary())                # outcome + selection blocks + rho/sigma
+yhat = mle.predict(X=X_new, Z=Z_new, kind="conditional")  # E[Y | X, Z, S=1]
+```
+
 ### Marginal effects (`get_margeff`)
 
 ```python
@@ -240,6 +257,7 @@ the number of restrictions.
 |------------------------------|------------------------------------------------------|
 | `CensoredRegression`         | Tobit-style estimator with arbitrary `left, right`   |
 | `TruncatedRegression`        | Truncated normal regression                          |
+| `HeckitRegression`           | Heckman sample-selection (two-step or joint MLE)     |
 | `lr_test(full, restricted)`  | Likelihood-ratio test between two nested models      |
 | `model.lr_test(hypotheses)`  | LR test for linear restrictions (`'x1 = 0, x2 = x3'`) |
 | `MarginalEffects`            | Returned by `.ame()` / `.mem()`; has `.to_dataframe()` |

@@ -723,6 +723,170 @@ def _build_visualization_notebook() -> nbf.NotebookNode:
     return nb
 
 
+def _build_heckit_notebook() -> nbf.NotebookNode:
+    nb = nbf.v4.new_notebook()
+    cells = [
+        _md(
+            "# Heckman's Sample-Selection Model (Heckit)\n"
+            "\n"
+            "When the outcome of interest is observed only for individuals who"
+            " 'self-select' into the sample (think wages — observed only for"
+            " those who work) and that selection is correlated with the outcome"
+            " error, OLS on the selected subsample is biased. Heckman (1979)"
+            " introduced a two-step correction; the joint maximum-likelihood"
+            " estimator is its asymptotically efficient sibling.\n"
+            "\n"
+            "Model:\n"
+            "\n"
+            "$$Y^* = X'\\beta + e, \\quad S^* = Z'\\gamma + u, \\quad S = \\mathbf 1\\{S^* > 0\\},$$\n"
+            "$$Y = Y^* \\text{ if } S = 1, \\text{ missing otherwise}, \\quad"
+            " (e, u) \\sim \\mathcal N\\!\\left(0, \\begin{pmatrix}\\sigma^2 & \\rho\\sigma \\\\ \\rho\\sigma & 1\\end{pmatrix}\\right).$$"
+        ),
+        _code(
+            "import numpy as np\n"
+            "import pandas as pd\n"
+            "import statsmodels.api as sm\n"
+            "from censtrunc import HeckitRegression\n"
+            "\n"
+            "rng = np.random.default_rng(42)\n"
+            "n = 4000\n"
+            "# Shared regressor (in both equations); two exclusive regressors\n"
+            "shared  = rng.normal(size=n)\n"
+            "x_only  = rng.normal(size=n)       # in the outcome eq. only\n"
+            "z_only  = rng.normal(size=n)       # in the selection eq. only (exclusion)\n"
+            "\n"
+            "beta_true  = np.array([1.0,  0.5, -0.3])     # const, shared, x_only\n"
+            "gamma_true = np.array([0.0,  0.3,  0.6])     # const, shared, z_only\n"
+            "rho_true, sigma_true = 0.6, 1.0\n"
+            "\n"
+            "Sigma = np.array([[sigma_true**2, rho_true*sigma_true],\n"
+            "                  [rho_true*sigma_true, 1.0]])\n"
+            "errs = rng.multivariate_normal([0.0, 0.0], Sigma, size=n)\n"
+            "e, u = errs[:, 0], errs[:, 1]\n"
+            "\n"
+            "X = np.column_stack([shared, x_only])\n"
+            "Z = np.column_stack([shared, z_only])\n"
+            "S = (gamma_true[0] + Z @ gamma_true[1:] + u > 0).astype(int)\n"
+            "y_full = beta_true[0] + X @ beta_true[1:] + e\n"
+            "y = np.where(S == 1, y_full, np.nan)\n"
+            "print(f'Selected (S=1): {S.sum()} / {n}  ({S.mean():.1%})')"
+        ),
+        _md(
+            "## Why OLS on the selected sample is biased\n"
+            "\n"
+            "Because $u$ and $e$ are correlated ($\\rho > 0$), individuals with"
+            " high $e$ tend to have high $u$ and therefore are more likely to be"
+            " selected. The conditional mean for the selected sample is\n"
+            "\n"
+            "$$\\mathbb E[Y \\mid X, S = 1] = X'\\beta + \\rho\\sigma\\,\\lambda(Z'\\gamma),$$\n"
+            "\n"
+            "with $\\lambda(\\cdot)$ the inverse Mills ratio. Omitting $\\lambda(Z'\\gamma)$"
+            " from the regression — what naive OLS does — produces omitted-variable"
+            " bias on $\\beta$."
+        ),
+        _code(
+            "sel = ~np.isnan(y)\n"
+            "X_full = sm.add_constant(X)\n"
+            "ols = sm.OLS(y[sel], X_full[sel]).fit()\n"
+            "print('OLS on selected subsample (biased):')\n"
+            "print(np.asarray(ols.params).round(4))\n"
+            "print('truth:', beta_true)"
+        ),
+        _md(
+            "## Two-step Heckit\n"
+            "\n"
+            "Heckman's two-step recipe:\n"
+            "\n"
+            "1. Probit of $S$ on $Z$ to obtain $\\hat\\gamma$.\n"
+            "2. Compute the inverse Mills ratio $\\hat\\lambda_i ="
+            " \\phi(Z_i'\\hat\\gamma)/\\Phi(Z_i'\\hat\\gamma)$ for selected observations.\n"
+            "3. OLS of $y_i$ on $(X_i,\\hat\\lambda_i)$ for selected $i$. The"
+            " coefficients are $\\hat\\beta$ and $\\hat\\rho\\hat\\sigma$."
+        ),
+        _code(
+            "m_two = HeckitRegression(method='twostep').fit(y, X, Z)\n"
+            "print(m_two.summary())"
+        ),
+        _md(
+            "## Joint MLE Heckit\n"
+            "\n"
+            "Maximise the full log-likelihood (Hansen 2022, §27.10):\n"
+            "\n"
+            "$$\\ell = \\sum_{S_i=0} \\log[1 - \\Phi(Z_i'\\gamma)] +"
+            " \\sum_{S_i=1}\\!\\left\\{\\log\\Phi\\!\\left(\\frac{Z_i'\\gamma +"
+            " (\\rho/\\sigma)(Y_i - X_i'\\beta)}{\\sqrt{1 - \\rho^2}}\\right) -"
+            " \\tfrac12\\log(2\\pi\\sigma^2) - \\frac{(Y_i - X_i'\\beta)^2}{2\\sigma^2}\\right\\}.$$\n"
+            "\n"
+            "Asymptotically efficient, somewhat slower than the two-step."
+        ),
+        _code(
+            "m_ml = HeckitRegression(method='mle').fit(y, X, Z)\n"
+            "print(m_ml.summary())"
+        ),
+        _md(
+            "## Side-by-side comparison\n"
+            "\n"
+            "All three estimators on the same data. Heckit's two-step and MLE"
+            " recover $\\beta_{\\text{shared}}$ much closer to the truth than OLS,"
+            " and they recover $\\rho$ and $\\sigma$ as well."
+        ),
+        _code(
+            "comparison = pd.DataFrame({\n"
+            "    'true':         beta_true,\n"
+            "    'OLS (biased)': np.asarray(ols.params),\n"
+            "    'Heckit 2step': m_two.coef_,\n"
+            "    'Heckit MLE':   m_ml.coef_,\n"
+            "}, index=['const', 'shared', 'x_only'])\n"
+            "comparison['OLS error']   = comparison['OLS (biased)'] - comparison['true']\n"
+            "comparison['2step error'] = comparison['Heckit 2step']  - comparison['true']\n"
+            "comparison['MLE error']   = comparison['Heckit MLE']    - comparison['true']\n"
+            "comparison.round(4)"
+        ),
+        _code(
+            "pd.DataFrame({\n"
+            "    'true':      [rho_true, sigma_true],\n"
+            "    'two-step':  [m_two.rho_, m_two.sigma_],\n"
+            "    'MLE':       [m_ml.rho_,  m_ml.sigma_],\n"
+            "}, index=['rho', 'sigma']).round(4)"
+        ),
+        _md(
+            "## Three kinds of prediction\n"
+            "\n"
+            "- `kind='selection_prob'`  — $P(S=1 \\mid Z) = \\Phi(Z'\\hat\\gamma)$,\n"
+            "- `kind='outcome'`         — $\\mathbb E[Y^* \\mid X] = X'\\hat\\beta$ (unconditional),\n"
+            "- `kind='conditional'`     — $\\mathbb E[Y \\mid X, Z, S=1] = X'\\hat\\beta +"
+            " \\hat\\rho\\hat\\sigma\\,\\lambda(Z'\\hat\\gamma)$."
+        ),
+        _code(
+            "preds = pd.DataFrame({\n"
+            "    'selection_prob': m_ml.predict(Z=Z[:6], kind='selection_prob'),\n"
+            "    'outcome':        m_ml.predict(X=X[:6], kind='outcome'),\n"
+            "    'conditional':    m_ml.predict(X=X[:6], Z=Z[:6], kind='conditional'),\n"
+            "    'observed_y':     y[:6],\n"
+            "    'selected':       S[:6],\n"
+            "})\n"
+            "preds.round(3)"
+        ),
+        _md(
+            "## Bootstrap standard errors\n"
+            "\n"
+            "Two-step second-stage standard errors are naive: they ignore the"
+            " variability of $\\hat\\gamma$ from the probit step. A paired bootstrap"
+            " gives proper SEs. The MLE Hessian-based SEs are already correct."
+        ),
+        _code(
+            "boot = m_two.bootstrap(y, X, Z, n_boot=80, seed=0)\n"
+            "pd.DataFrame({\n"
+            "    'beta':         m_two.coef_,\n"
+            "    'naive SE':     m_two.bse_,\n"
+            "    'bootstrap SE': boot['beta_se'],\n"
+            "}, index=['const', 'shared', 'x_only']).round(4)"
+        ),
+    ]
+    nb["cells"] = cells
+    return nb
+
+
 def _execute_and_save(nb: nbf.NotebookNode, path: Path) -> None:
     """Execute a notebook in-place (so outputs are saved) and write to disk."""
     client = NotebookClient(nb, timeout=120, kernel_name="python3")
@@ -739,6 +903,7 @@ def main() -> int:
         "03_truncated_regression.ipynb": _build_truncated_notebook,
         "04_validation.ipynb": _build_validation_notebook,
         "05_truncated_vs_censored_visual.ipynb": _build_visualization_notebook,
+        "06_heckit.ipynb": _build_heckit_notebook,
     }
     for fname, builder in builders.items():
         nb = builder()

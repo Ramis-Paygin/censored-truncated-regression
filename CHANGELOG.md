@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with arbitrary `left` and `right` thresholds (generalised Type-1 Tobit).
 - `TruncatedRegression`: maximum-likelihood estimator for truncated normal
   regression with arbitrary `left` and `right` thresholds.
+- `HeckitRegression`: Heckman (1979) sample-selection regression with both the
+  two-step estimator (probit on `Z` + OLS of `Y` on `(X, lambda_hat)` on the
+  selected subsample) and the joint maximum-likelihood estimator. Includes a
+  `bootstrap()` helper for proper two-step standard errors and a `predict()`
+  with three kinds: `'outcome'` (`X'beta`), `'selection_prob'` (`Phi(Z'gamma)`),
+  and `'conditional'` (`E[Y | X, Z, S=1] = X'beta + rho*sigma*lambda(Z'gamma)`).
 - A unified `predict()` that returns any combination of **six** quantities
   via a compact one-letter ``kind`` argument:
 
