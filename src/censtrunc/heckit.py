@@ -345,7 +345,18 @@ class HeckitRegression:
                 f"Left-hand side of the selection formula must be binary (0/1); "
                 f"got values: {np.unique(s_arr)[:5]} ..."
             )
-        y_arr, X_arr, _y_name, x_names = parse_single_formula(outcome, data)
+        # The outcome y is missing for unselected rows (e.g. wage for non-workers).
+        # We must keep those rows so X and Z line up with the selection vector,
+        # so disable patsy's automatic NA-drop here.
+        y_arr, X_arr, _y_name, x_names = parse_single_formula(
+            outcome, data, keep_missing=True,
+        )
+        if y_arr.shape[0] != s_arr.shape[0]:
+            raise ValueError(
+                "Outcome and selection formulas resolved to different sample sizes "
+                f"({y_arr.shape[0]} vs {s_arr.shape[0]}). Did you drop rows from `data` "
+                "before passing it in?"
+            )
         # Mark unselected observations as NaN so the fit pipeline handles them.
         y_arr = np.where(s_arr == 1, y_arr, np.nan)
         instance._pending_formula_data = (y_arr, X_arr, Z_arr, x_names, z_names)

@@ -23,7 +23,7 @@ import numpy as np
 
 
 def parse_single_formula(
-    formula: str, data: Any
+    formula: str, data: Any, *, keep_missing: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, str, list[str]]:
     """Parse a one-equation formula and return ``(y, X, y_name, x_names)``.
 
@@ -33,6 +33,12 @@ def parse_single_formula(
         Patsy formula, e.g. ``'y ~ 1 + x1 + x2'``.
     data : pandas.DataFrame or compatible mapping
         Source of the columns referenced in the formula.
+    keep_missing : bool, default ``False``
+        If ``True``, rows containing ``NaN`` in any referenced column are
+        retained (patsy's NA-detection is disabled). The Heckman selection
+        model needs this for its outcome equation, where ``y`` is missing
+        exactly for the unselected rows but the corresponding ``X`` and ``Z``
+        rows must still be kept.
 
     Returns
     -------
@@ -50,7 +56,10 @@ def parse_single_formula(
             "Formula parsing requires `patsy`. Install with: pip install patsy"
         ) from exc
 
-    y_df, X_df = patsy.dmatrices(formula, data, return_type="dataframe")
+    na_action = patsy.NAAction(NA_types=[]) if keep_missing else patsy.NAAction()
+    y_df, X_df = patsy.dmatrices(
+        formula, data, NA_action=na_action, return_type="dataframe",
+    )
     if y_df.shape[1] != 1:
         raise ValueError(
             f"Formula {formula!r} must have exactly one left-hand-side column; "

@@ -905,6 +905,111 @@ def _build_heckit_notebook() -> nbf.NotebookNode:
             "    'bootstrap SE': boot['beta_se'],\n"
             "}, index=['const', 'shared', 'x_only']).round(4)"
         ),
+        _md(
+            "---\n"
+            "## Real-data demonstration: Mroz (1987)\n"
+            "\n"
+            "The canonical Heckit application — Wooldridge's wage equation for"
+            " married women. Of the 753 observations in Mroz's dataset, 428 women"
+            " are in the labor force (`inlf = 1`) and have an observed `lwage`;"
+            " the remaining 325 do not work and `lwage` is missing. Running OLS"
+            " on the 428 working women answers a conditional question — *what"
+            " determines wages among those who choose to work?* — whereas the"
+            " latent question — *what would women earn if everyone worked?* —"
+            " is what Heckit estimates.\n"
+            "\n"
+            "Following Wooldridge (2010, Example 17.5):\n"
+            "\n"
+            "- **Outcome equation:** `lwage ~ educ + exper + expersq`\n"
+            "- **Selection equation:** `inlf ~ educ + exper + expersq + nwifeinc + age + kidslt6 + kidsge6`\n"
+            "\n"
+            "`nwifeinc`, `age`, `kidslt6`, and `kidsge6` serve as the exclusion"
+            " restriction (they shift the *decision to work* but are not"
+            " supposed to affect wages directly)."
+        ),
+        _code(
+            "try:\n"
+            "    import wooldridge as woo\n"
+            "    mroz = woo.data('mroz')\n"
+            "except ImportError:\n"
+            "    raise ImportError('Install with: pip install wooldridge')\n"
+            "\n"
+            "print(f'shape: {mroz.shape}')\n"
+            "print(f'in labor force (inlf=1): {(mroz[\"inlf\"]==1).sum()}')\n"
+            "print(f'out of labor force:      {(mroz[\"inlf\"]==0).sum()}')\n"
+            "print(f'lwage missing where inlf=0: {mroz.loc[mroz[\"inlf\"]==0, \"lwage\"].isna().sum()}/'\n"
+            "      f'{(mroz[\"inlf\"]==0).sum()}  (should be 100% — the canonical selection setup)')"
+        ),
+        _md(
+            "**Step 1 — naive OLS on the working subsample.** This is what one"
+            " gets by ignoring the selection problem. We will compare its"
+            " coefficient on `educ` to the Heckit-corrected version below."
+        ),
+        _code(
+            "import statsmodels.formula.api as smf\n"
+            "\n"
+            "ols = smf.ols('lwage ~ educ + exper + expersq',\n"
+            "              data=mroz[mroz['inlf'] == 1]).fit()\n"
+            "print(ols.summary().tables[1])"
+        ),
+        _md(
+            "**Step 2 — Heckit two-step.** The selection equation includes the"
+            " exclusion variables; the second stage adds the inverse Mills ratio"
+            " to the wage equation."
+        ),
+        _code(
+            "from censtrunc import HeckitRegression\n"
+            "\n"
+            "heck_ts = HeckitRegression.from_formula(\n"
+            "    outcome   = 'lwage ~ educ + exper + expersq',\n"
+            "    selection = 'inlf ~ educ + exper + expersq + nwifeinc + age + kidslt6 + kidsge6',\n"
+            "    data=mroz, method='twostep',\n"
+            ").fit()\n"
+            "print(heck_ts.summary())"
+        ),
+        _md(
+            "**Step 3 — Joint MLE Heckit** (asymptotically efficient)."
+        ),
+        _code(
+            "heck_ml = HeckitRegression.from_formula(\n"
+            "    outcome   = 'lwage ~ educ + exper + expersq',\n"
+            "    selection = 'inlf ~ educ + exper + expersq + nwifeinc + age + kidslt6 + kidsge6',\n"
+            "    data=mroz, method='mle',\n"
+            ").fit()\n"
+            "print(heck_ml.summary())"
+        ),
+        _md(
+            "### Coefficient comparison\n"
+            "\n"
+            "Lining up the three wage-equation slope estimates. Wooldridge's"
+            " textbook reports an OLS return-to-education of about 0.108; the"
+            " Heckit-corrected return is close to that, and the implied"
+            " correlation $\\hat\\rho$ between the wage-equation error and the"
+            " participation error is informative about how strong the selection"
+            " channel is."
+        ),
+        _code(
+            "import numpy as np\n"
+            "comparison = pd.DataFrame({\n"
+            "    'OLS (selected)': np.asarray(ols.params),\n"
+            "    'Heckit two-step': heck_ts.coef_,\n"
+            "    'Heckit MLE':     heck_ml.coef_,\n"
+            "}, index=heck_ts.outcome_feature_names_)\n"
+            "comparison.round(4)"
+        ),
+        _code(
+            "pd.DataFrame({\n"
+            "    'two-step':  [heck_ts.rho_, heck_ts.sigma_],\n"
+            "    'MLE':       [heck_ml.rho_, heck_ml.sigma_],\n"
+            "}, index=['rho', 'sigma']).round(4)"
+        ),
+        _md(
+            "Interpreting $\\hat\\rho$: a positive (negative) value means that the"
+            " unobserved factors that raise wages also raise (lower) the"
+            " probability of working. If $\\hat\\rho$ is small or insignificant"
+            " (a Wald or LR test on $\\rho = 0$ would say so), the selection"
+            " correction is empirically unnecessary and ordinary OLS is fine."
+        ),
     ]
     nb["cells"] = cells
     return nb
