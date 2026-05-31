@@ -30,6 +30,7 @@ SOURCE_NOTEBOOKS = [
     ("Example 2 — Classical Tobit (Fair Affairs Data)", "02_classical_tobit_affairs.ipynb"),
     ("Example 3 — Truncated Regression", "03_truncated_regression.ipynb"),
     ("Example 4 — Validation against OLS and R", "04_validation.ipynb"),
+    ("Example 5 — Visual: Truncated vs Censored", "05_truncated_vs_censored_visual.ipynb"),
 ]
 
 

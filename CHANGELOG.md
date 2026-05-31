@@ -50,8 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every fitted-model summary.
 - statsmodels-style `summary()` with coefficient table, Wald inference,
   AIC/BIC, McFadden's pseudo-R², and per-region censoring counts.
-- Three executed example notebooks in `examples/`:
-  two-sided censoring, classical Tobit on Fair (1978), and truncated
-  regression.
+- Five executed example notebooks in `examples/`:
+  two-sided censoring, classical Tobit on Fair (1978), truncated regression,
+  validation against OLS and R, and a side-by-side visual comparison
+  of truncated vs censored fits with an asymptotic prediction band.
 - Test suite (29 tests, including Monte Carlo consistency checks) and a CI
   workflow that runs them on Python 3.10-3.13 across Linux and macOS.

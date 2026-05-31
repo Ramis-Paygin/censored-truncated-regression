@@ -593,6 +593,136 @@ def _build_validation_notebook() -> nbf.NotebookNode:
     return nb
 
 
+def _build_visualization_notebook() -> nbf.NotebookNode:
+    nb = nbf.v4.new_notebook()
+    cells = [
+        _md(
+            "# Visual: Truncated vs Censored\n"
+            "\n"
+            "A picture worth a thousand summary tables. We simulate a simple\n"
+            "linear DGP, observe it through either truncation or censoring at the\n"
+            "same thresholds, fit `censtrunc` to each, and overlay the model's\n"
+            "predicted conditional mean as a band of asymptotic uncertainty.\n"
+            "\n"
+            "This mirrors the style of the well-known"
+            " `pymc-devs`"
+            " GLM-truncated-censored-regression demonstration, but uses our\n"
+            "frequentist MLE instead of MCMC: the band is built by sampling\n"
+            "parameters from the asymptotic distribution\n"
+            "$\\hat{\\theta} \\sim \\mathcal{N}(\\hat{\\theta}_{\\mathrm{MLE}},\\,\\widehat{\\mathrm{Var}}(\\hat{\\theta}_{\\mathrm{MLE}}))$\n"
+            "and drawing one prediction curve per sample."
+        ),
+        _code(
+            "import numpy as np\n"
+            "import matplotlib.pyplot as plt\n"
+            "import pandas as pd\n"
+            "from censtrunc import CensoredRegression, TruncatedRegression\n"
+            "from censtrunc._means import value_for_kind\n"
+            "from censtrunc._utils import _prepare_design_matrix\n"
+            "\n"
+            "rng = np.random.default_rng(2026)\n"
+            "n = 250\n"
+            "x = rng.uniform(-10, 10, size=n)\n"
+            "sigma_true = 2.0\n"
+            "y_star = 1.0 * x + rng.normal(scale=sigma_true, size=n)\n"
+            "L, R = -5.0, 5.0"
+        ),
+        _md(
+            "**Truncated dataset:** observations with $y \\notin (L, R)$ are dropped"
+            " entirely. **Censored dataset:** they are clipped to the nearest"
+            " threshold. The latent linear function $y = x$ is the same in both."
+        ),
+        _code(
+            "mask = (y_star > L) & (y_star < R)\n"
+            "x_t, y_t = x[mask], y_star[mask]\n"
+            "x_c, y_c = x.copy(), np.clip(y_star, L, R)\n"
+            "\n"
+            "mt = TruncatedRegression(left=L, right=R).fit(x_t.reshape(-1, 1), y_t)\n"
+            "mc = CensoredRegression(left=L, right=R).fit(x_c.reshape(-1, 1), y_c)\n"
+            "print(f'truncated:  n={len(y_t)}, beta_hat = {mt.coef_.round(3)}')\n"
+            "print(f'censored:   n={len(y_c)}, beta_hat = {mc.coef_.round(3)}')"
+        ),
+        _md(
+            "Now we build a prediction band from asymptotic uncertainty. We draw"
+            " 200 parameter vectors from the asymptotic normal distribution of"
+            " $\\hat\\theta$, compute the corresponding conditional mean curve"
+            " (truncated on the left, censored on the right), and plot them with"
+            " low opacity. The pile-up at the censoring thresholds is shown in"
+            " red on the right."
+        ),
+        _code(
+            "def prediction_band(model, x_grid, kind, n_draws=200, seed=0):\n"
+            "    rng = np.random.default_rng(seed)\n"
+            "    samples = rng.multivariate_normal(model.params_, model.cov_params_, size=n_draws)\n"
+            "    samples = samples[samples[:, 0] > 0]   # keep only feasible sigma > 0\n"
+            "    Xg, _ = _prepare_design_matrix(x_grid.reshape(-1, 1), fit_intercept=True)\n"
+            "    curves = np.empty((samples.shape[0], x_grid.size))\n"
+            "    for i, theta in enumerate(samples):\n"
+            "        sigma, beta = theta[0], theta[1:]\n"
+            "        curves[i] = value_for_kind(\n"
+            "            beta, sigma, Xg,\n"
+            "            model._left, model._right, model._has_left, model._has_right, kind,\n"
+            "        )\n"
+            "    return curves\n"
+            "\n"
+            "x_grid = np.linspace(-10, 10, 300)\n"
+            "curves_t = prediction_band(mt, x_grid, kind='truncated')\n"
+            "curves_c = prediction_band(mc, x_grid, kind='censored')"
+        ),
+        _code(
+            "fig, axes = plt.subplots(1, 2, figsize=(13, 5.5), sharey=True)\n"
+            "for ax in axes:\n"
+            "    ax.set_facecolor('#eaeaf2')\n"
+            "    ax.grid(True, color='white', linewidth=1)\n"
+            "    ax.axhline(L, color='crimson', linestyle='--', linewidth=1.2)\n"
+            "    ax.axhline(R, color='crimson', linestyle='--', linewidth=1.2)\n"
+            "    ax.set_xlim(-10, 10); ax.set_ylim(-10, 10)\n"
+            "    ax.set_xlabel('x'); ax.set_ylabel('y')\n"
+            "    ax.plot(x_grid, x_grid, color='black', linewidth=2.5, label='True')\n"
+            "\n"
+            "# Left panel: truncated\n"
+            "ax = axes[0]\n"
+            "ax.set_title('Truncated data')\n"
+            "for c in curves_t:\n"
+            "    ax.plot(x_grid, c, color='steelblue', alpha=0.04, linewidth=1)\n"
+            "ax.scatter(x_t, y_t, c='black', s=14, zorder=5)\n"
+            "ax.legend(loc='upper left')\n"
+            "\n"
+            "# Right panel: censored\n"
+            "ax = axes[1]\n"
+            "ax.set_title('Censored data')\n"
+            "for c in curves_c:\n"
+            "    ax.plot(x_grid, c, color='steelblue', alpha=0.04, linewidth=1)\n"
+            "is_at_bound = (y_c == L) | (y_c == R)\n"
+            "ax.scatter(x_c[~is_at_bound], y_c[~is_at_bound], c='black', s=14, zorder=5)\n"
+            "ax.scatter(x_c[is_at_bound],  y_c[is_at_bound],  c='crimson', s=14, zorder=5, alpha=0.7)\n"
+            "ax.legend(loc='upper left')\n"
+            "\n"
+            "plt.tight_layout(); plt.show()"
+        ),
+        _md(
+            "**What to look for.**\n"
+            "\n"
+            "- The black line is the true linear relation $y^* = x$.\n"
+            "- The blue band is the model's MLE prediction with asymptotic\n"
+            "  uncertainty; on the **left** it bends inside $(L, R)$ because the\n"
+            "  truncated mean $\\mathbb E[Y \\mid X, L<Y<R]$ is shrunk toward the"
+            " interval centre; on the **right** it flattens near each threshold"
+            " because the censored mean $\\mathbb E[Y\\mid X]$ mixes the latent"
+            " linear part with the threshold mass.\n"
+            "- Red dots on the right panel are the censored pile-ups at $y=L$ and"
+            " $y=R$. The truncated dataset has no such pile-ups because those"
+            " observations are absent entirely.\n"
+            "- Both fitted curves are close to the true line in the interior, where"
+            " the data are most informative; both lose precision near and beyond"
+            " the thresholds, but neither shows the strong attenuation toward"
+            " zero that OLS would suffer."
+        ),
+    ]
+    nb["cells"] = cells
+    return nb
+
+
 def _execute_and_save(nb: nbf.NotebookNode, path: Path) -> None:
     """Execute a notebook in-place (so outputs are saved) and write to disk."""
     client = NotebookClient(nb, timeout=120, kernel_name="python3")
@@ -608,6 +738,7 @@ def main() -> int:
         "02_classical_tobit_affairs.ipynb": _build_classical_tobit_notebook,
         "03_truncated_regression.ipynb": _build_truncated_notebook,
         "04_validation.ipynb": _build_validation_notebook,
+        "05_truncated_vs_censored_visual.ipynb": _build_visualization_notebook,
     }
     for fname, builder in builders.items():
         nb = builder()

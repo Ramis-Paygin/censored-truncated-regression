@@ -272,6 +272,11 @@ The `examples/` directory contains three executed Jupyter notebooks:
    comparison against OLS.
 3. **`03_truncated_regression.ipynb`** — truncated regression on simulated
    data, showing the OLS bias.
+4. **`04_validation.ipynb`** — equivalence with OLS in the no-censoring limit
+   plus a live comparison against R's `survreg` / `truncreg`.
+5. **`05_truncated_vs_censored_visual.ipynb`** — side-by-side plot of fits
+   under truncation and censoring, with an asymptotic prediction band
+   (frequentist analogue of the pymc-devs GLM-truncated-censored figure).
 
 Rebuild the notebooks from source with
 
