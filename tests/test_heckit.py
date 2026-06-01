@@ -142,3 +142,45 @@ def test_summary_renders_two_blocks(heckit_data):
     assert "Outcome equation" in text
     assert "Selection equation" in text
     assert "rho" in text.lower()
+
+
+# ----------------------------------------------------------------------
+# Cross-validation against `py4etrics.Heckit`.
+#
+# py4etrics is the Heckit reference recommended during review (`py4etrics`,
+# Hasebe et al., https://py4etrics-github-io.translate.goog/ ). It only
+# implements the two-step estimator -- the `method='mle'` kwarg is a no-op
+# silently dispatched to two-step. We compare *both* the outcome equation
+# (beta) and the selection equation (gamma) on the same simulated data; the
+# numbers must match to many decimals since both packages solve the same
+# closed-form Heckman expressions.
+# ----------------------------------------------------------------------
+
+py4etrics = pytest.importorskip("py4etrics.heckit")
+
+
+def test_twostep_matches_py4etrics(heckit_data):
+    """censtrunc.HeckitRegression(method='twostep') should reproduce
+    py4etrics.Heckit to machine precision on the outcome coefficients,
+    selection coefficients, sigma and rho.
+    """
+    import warnings
+
+    y, X, Z = heckit_data["y"], heckit_data["X"], heckit_data["Z"]
+    # py4etrics expects design matrices that include the intercept column.
+    X_with_const = sm.add_constant(X)
+    Z_with_const = sm.add_constant(Z)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        ref = py4etrics.Heckit(y, X_with_const, Z_with_const).fit(method="twostep")
+
+    m = HeckitRegression(method="twostep", fit_intercept=True).fit(y, X, Z)
+
+    # outcome beta -- py4etrics stores them in `.params`
+    np.testing.assert_allclose(m.coef_, ref.params, atol=1e-6)
+    # selection gamma -- py4etrics stores them on the probit results object
+    np.testing.assert_allclose(m.gamma_, ref.select_res.params, atol=1e-6)
+    # variance and correlation of residuals (py4etrics' attribute names differ)
+    assert abs(m.sigma_ - np.sqrt(ref.var_reg_error)) < 1e-6
+    assert abs(m.rho_ - ref.corr_eqnerrors) < 1e-6

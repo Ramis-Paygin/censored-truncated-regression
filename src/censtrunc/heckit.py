@@ -218,6 +218,11 @@ class HeckitRegression:
     bse_gamma_: np.ndarray = field(default=None, init=False, repr=False)  # type: ignore[assignment]
     pvalues_: np.ndarray = field(default=None, init=False, repr=False)  # type: ignore[assignment]
     pvalues_gamma_: np.ndarray = field(default=None, init=False, repr=False)  # type: ignore[assignment]
+    # Full covariance matrix of [sigma, rho, beta..., gamma...] (MLE only). Used
+    # by ``get_margeff`` for the delta-method standard errors. ``None`` after a
+    # two-step fit because the two-step covariance of the joint parameter is not
+    # available in closed form -- bootstrap if you need it.
+    cov_params_: np.ndarray | None = field(default=None, init=False, repr=False)
     llf_: float = field(default=np.nan, init=False, repr=False)
     n_obs_: int = field(default=0, init=False, repr=False)
     n_selected_: int = field(default=0, init=False, repr=False)
@@ -226,6 +231,12 @@ class HeckitRegression:
     converged_: bool = field(default=False, init=False, repr=False)
     _fitted: bool = field(default=False, init=False, repr=False)
     _pending_formula_data: Any = field(default=None, init=False, repr=False)
+    # Cached design matrices (with intercept column if present) and selection
+    # indicator -- used by ``get_margeff`` to evaluate at='overall'/'mean'/
+    # 'median' without re-asking the user for the training data.
+    _X_train_: np.ndarray = field(default=None, init=False, repr=False)  # type: ignore[assignment]
+    _Z_train_: np.ndarray = field(default=None, init=False, repr=False)  # type: ignore[assignment]
+    _s_train_: np.ndarray = field(default=None, init=False, repr=False)  # type: ignore[assignment]
 
     # ------------------------------------------------------------------
     # fit
@@ -307,6 +318,10 @@ class HeckitRegression:
         else:
             self._fit_mle(X_design, y_safe, Z_design, s)
 
+        # Cache for get_margeff (cheap; we already hold these via the optimiser).
+        self._X_train_ = X_design
+        self._Z_train_ = Z_design
+        self._s_train_ = s
         self._fitted = True
         return self
 
@@ -462,9 +477,11 @@ class HeckitRegression:
         self.gamma_ = params[2 + k_x : 2 + k_x + k_z].copy()
         self.llf_ = -float(res.fun)
 
-        # Standard errors via numerical Hessian.
-        bse_full = self._numeric_hessian_se(params, X, y, Z, s, k_x, k_z)
-        # bse_full order: [sigma, rho, beta..., gamma...]
+        # Standard errors via numerical Hessian of the negative joint log-lik.
+        cov_full = self._numeric_cov_params(params, X, y, Z, s, k_x, k_z)
+        self.cov_params_ = cov_full
+        bse_full = np.sqrt(np.maximum(np.diag(cov_full), 0.0))
+        # order: [sigma, rho, beta..., gamma...]
         self.bse_ = bse_full[2 : 2 + k_x]
         self.bse_gamma_ = bse_full[2 + k_x : 2 + k_x + k_z]
         self.pvalues_ = 2 * (1 - norm.cdf(np.abs(self.coef_ / self.bse_)))
@@ -473,7 +490,7 @@ class HeckitRegression:
         self._bse_rho = float(bse_full[1])
 
     @staticmethod
-    def _numeric_hessian_se(
+    def _numeric_cov_params(
         params: np.ndarray,
         X: np.ndarray,
         y: np.ndarray,
@@ -482,6 +499,8 @@ class HeckitRegression:
         k_x: int,
         k_z: int,
     ) -> np.ndarray:
+        """Observed-information covariance: inverse of the numerical Hessian
+        of the negative joint log-likelihood at the MLE."""
         step = np.cbrt(np.finfo(float).eps)
         p = params.shape[0]
         h = step * np.maximum(np.abs(params), 1.0)
@@ -511,9 +530,9 @@ class HeckitRegression:
         H = 0.5 * (H + H.T)
         try:
             cov = np.linalg.inv(H)
-        except np.linalg.LinAlgError:
+        except np.linalg.LinAlgError:  # pragma: no cover
             cov = np.linalg.pinv(H)
-        return np.sqrt(np.maximum(np.diag(cov), 0.0))
+        return cov
 
     # ------------------------------------------------------------------
     # Bootstrap (proper two-step SE)
@@ -677,6 +696,60 @@ class HeckitRegression:
 
     def __str__(self) -> str:  # pragma: no cover - cosmetic
         return self.summary() if self._fitted else f"HeckitRegression(method={self.method!r}) [not fitted]"
+
+    # ------------------------------------------------------------------
+    # Marginal effects
+    # ------------------------------------------------------------------
+
+    def get_margeff(
+        self,
+        at: str = "overall",
+        kind: str = "conditional",
+        atexog: dict | None = None,
+    ) -> Any:
+        """Marginal effects for the Heckman selection model.
+
+        Parameters
+        ----------
+        at : {'overall', 'mean', 'median', 'zero'}, default ``'overall'``
+            Point at which to evaluate the effect. ``'overall'`` averages the
+            per-observation effects (the *AME*); the others evaluate at a
+            single representative point (the *MEM* family).
+        kind : {'conditional', 'unconditional', 'prob-selected', 'latent'}
+            Which quantity to differentiate (see :mod:`_heckit_effects`):
+
+            - ``'latent'``       — ``E[Y* | X]`` (returns the outcome slopes).
+            - ``'conditional'``  — ``E[Y | X, Z, S=1]`` (default; includes the
+              Mills-ratio correction on Z-side variables).
+            - ``'unconditional'``— ``E[Y * S | X, Z]`` (treats unselected
+              observations as ``Y = 0``; useful when zero is the natural
+              "no-selection" value, e.g. wage for non-workers).
+            - ``'prob-selected'``— ``P(S = 1 | Z)``.
+
+        Returns
+        -------
+        MarginalEffects
+            Object with attributes ``margeff``, ``margeff_se``, ``tvalues``,
+            ``pvalues``, ``names`` (same dataclass used by the censored /
+            truncated models). Standard errors are delta-method on the joint
+            MLE covariance; for a two-step fit the standard errors are
+            ``NaN`` (a bootstrap is the right tool there -- see
+            :meth:`bootstrap`).
+        """
+        self._check_fitted()
+        from ._heckit_effects import get_heckit_margeff
+
+        return get_heckit_margeff(self, at=at, kind=kind, atexog=atexog)
+
+    def ame(self, kind: str = "conditional") -> Any:
+        """Shortcut for :meth:`get_margeff` at the **A**verage **M**arginal
+        **E**ffect (i.e. ``at='overall'``)."""
+        return self.get_margeff(at="overall", kind=kind)
+
+    def mem(self, kind: str = "conditional") -> Any:
+        """Shortcut for :meth:`get_margeff` at the sample-**M**ean
+        **E**valuation point (``at='mean'``)."""
+        return self.get_margeff(at="mean", kind=kind)
 
     # ------------------------------------------------------------------
     # Internals
