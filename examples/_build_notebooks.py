@@ -1021,22 +1021,50 @@ def _build_heckit_notebook() -> nbf.NotebookNode:
             " the log-likelihood all match to optimiser tolerance (~$10^{-3}$)."
         ),
         _md(
-            "## Three kinds of prediction\n"
+            "## Six kinds of prediction\n"
             "\n"
-            "- `kind='selection_prob'`  — $P(S=1 \\mid Z) = \\Phi(Z'\\hat\\gamma)$,\n"
-            "- `kind='outcome'`         — $\\mathbb E[Y^* \\mid X] = X'\\hat\\beta$ (unconditional),\n"
-            "- `kind='conditional'`     — $\\mathbb E[Y \\mid X, Z, S=1] = X'\\hat\\beta +"
-            " \\hat\\rho\\hat\\sigma\\,\\lambda(Z'\\hat\\gamma)$."
+            "Six Heckman quantities are exposed through a single `predict()`. Each"
+            " has a one-letter code so that any subset can be requested at once."
+            " With $\\lambda(t) = \\phi(t)/\\Phi(t)$ the inverse Mills ratio:\n"
+            "\n"
+            "**Selection equation** (uses $Z$):\n"
+            "\n"
+            "- **`s`** — selection probability: $P(S=1 \\mid Z) = \\Phi(Z'\\hat\\gamma)$\n"
+            "- **`n`** — non-selection probability: $P(S=0 \\mid Z) = 1 - \\Phi(Z'\\hat\\gamma)$\n"
+            "- **`p`** — selection propensity (latent index): $Z'\\hat\\gamma$\n"
+            "\n"
+            "**Outcome equation** (uses $X$, sometimes both):\n"
+            "\n"
+            "- **`o`** — $\\mathbb E[Y \\mid X, Z, S=1] = X'\\hat\\beta + \\hat\\rho\\hat\\sigma\\,\\lambda(Z'\\hat\\gamma)$ (observed conditional)\n"
+            "- **`h`** — $\\mathbb E[Y^* \\mid X] = X'\\hat\\beta$ (hidden / unconditional latent)\n"
+            "- **`u`** — $\\mathbb E[Y^* \\mid X, Z, S=0] = X'\\hat\\beta - \\hat\\rho\\hat\\sigma\\,\\phi(Z'\\hat\\gamma)/[1-\\Phi(Z'\\hat\\gamma)]$ (unobserved conditional)\n"
+            "\n"
+            "Calling `predict(X=..., Z=...)` with no `kind` returns all six columns"
+            " as a `DataFrame` in the order `s, n, p, o, h, u`. Subsets are"
+            " selected by letter string (`kind='sn'`, `kind='ohu'`, ...). A single"
+            " letter returns a 1-D `ndarray`. Long names `'outcome'`,"
+            " `'selection_prob'`, `'conditional'` keep working for backward"
+            " compatibility (they alias `'h'`, `'s'`, `'o'`)."
         ),
         _code(
-            "preds = pd.DataFrame({\n"
-            "    'selection_prob': m_ml.predict(Z=Z[:6], kind='selection_prob'),\n"
-            "    'outcome':        m_ml.predict(X=X[:6], kind='outcome'),\n"
-            "    'conditional':    m_ml.predict(X=X[:6], Z=Z[:6], kind='conditional'),\n"
-            "    'observed_y':     y[:6],\n"
-            "    'selected':       S[:6],\n"
-            "})\n"
-            "preds.round(3)"
+            "preds = m_ml.predict(X=X[:6], Z=Z[:6])   # default = all six\n"
+            "preds.assign(observed_y=y[:6], selected=S[:6]).round(3)"
+        ),
+        _md(
+            "Subsets via letter strings. The two probabilities sum to one; the"
+            " three E[Y]-style columns satisfy $\\mathbb E[Y\\cdot S] = \\Phi(Z'\\gamma)"
+            " \\cdot o + [1-\\Phi(Z'\\gamma)] \\cdot 0$, which is just $\\Phi(Z'\\gamma)"
+            " \\cdot o$ on the selected and 0 on the unselected when the latter"
+            " contribute $Y = 0$."
+        ),
+        _code(
+            "m_ml.predict(Z=Z[:6], kind='sn').round(3)   # only the two probabilities"
+        ),
+        _code(
+            "m_ml.predict(X=X[:6], Z=Z[:6], kind='ohu').round(3)   # the three E[Y] variants"
+        ),
+        _code(
+            "m_ml.predict(X=X[:6], kind='h').round(3)   # single letter -> 1-D ndarray"
         ),
         _md(
             "## Same fit via a patsy formula\n"

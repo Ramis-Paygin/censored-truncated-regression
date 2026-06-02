@@ -95,6 +95,10 @@ thresholds and no observations are reported there).
   compact one-letter `kind` argument (e.g. `kind='hctlmr'` for all six,
   `kind='lmr'` for just the probabilities, `kind='h'` for the latent mean).
   Long names (`'latent'`, `'censored'`, `'truncated'`) remain valid.
+  `HeckitRegression.predict()` mirrors the same idea with six Heckman-specific
+  letter codes: `s` = $P(S{=}1)$, `n` = $P(S{=}0)$, `p` = $Z'\gamma$ propensity,
+  `o` = $E[Y\mid S{=}1]$, `h` = $E[Y^*]$, `u` = $E[Y^*\mid S{=}0]$
+  (default `'snpohu'` returns all six).
 - **Marginal effects** via a single `get_margeff` method whose API mirrors
   statsmodels' `get_margeff`: choose *where* to evaluate (`at='overall'` = AME,
   `at='mean'` = MEM, plus `'median'`/`'zero'`) and *what* to report
@@ -256,7 +260,14 @@ from censtrunc import HeckitRegression
 twostep = HeckitRegression(method="twostep").fit(y, X, Z)
 mle     = HeckitRegression(method="mle").fit(y, X, Z)
 print(twostep.summary())                # outcome + selection blocks + rho/sigma
-yhat = mle.predict(X=X_new, Z=Z_new, kind="conditional")  # E[Y | X, Z, S=1]
+
+# Six prediction kinds in one call (DataFrame with columns prob_selected,
+# prob_not_selected, propensity, observed, hidden, unobserved):
+all_six = mle.predict(X=X_new, Z=Z_new)
+# Just the two probabilities:
+mle.predict(Z=Z_new, kind="sn")
+# Just the conditional outcome mean E[Y|X,Z,S=1] (1-D ndarray):
+yhat = mle.predict(X=X_new, Z=Z_new, kind="o")
 ```
 
 ### Patsy-style formulas

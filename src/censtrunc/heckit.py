@@ -577,58 +577,149 @@ class HeckitRegression:
         self,
         X: Any | None = None,
         Z: Any | None = None,
-        kind: str = "conditional",
-    ) -> np.ndarray:
-        """Predict outcomes or selection probabilities.
+        kind: str | None = None,
+    ) -> Any:
+        """Predict any combination of six Heckman quantities.
+
+        Six quantities are produced; each has a one-letter code that may be
+        combined (in any order, repeats ignored) to request several columns at
+        once. With ``lam(t) = phi(t)/Phi(t)`` the inverse Mills ratio:
+
+        =====  =============================  ======================================================================
+        Code   Quantity                        Formula
+        =====  =============================  ======================================================================
+        ``s``  selection probability           ``P(S = 1 | Z) = Phi(Z'gamma)``
+        ``n``  non-selection probability       ``P(S = 0 | Z) = 1 - Phi(Z'gamma)``
+        ``p``  selection propensity (latent)   ``Z'gamma``
+        ``o``  E[Y | observed]                 ``E[Y | X, Z, S = 1] = X'beta + rho*sigma*lam(Z'gamma)``
+        ``h``  E[Y*] hidden (unconditional)    ``E[Y* | X] = X'beta``
+        ``u``  E[Y* | unobserved]              ``E[Y* | X, Z, S = 0] = X'beta - rho*sigma*phi(Z'gamma)/(1 - Phi(Z'gamma))``
+        =====  =============================  ======================================================================
+
+        Required inputs per code:
+
+        - ``s``, ``n``, ``p``  -- need only ``Z``;
+        - ``h``                -- needs only ``X``;
+        - ``o``, ``u``         -- need both ``X`` and ``Z``.
 
         Parameters
         ----------
         X : array-like or None
-            Outcome regressors (required for ``'outcome'`` and ``'conditional'``).
+            Outcome-equation regressors. Required if any requested code touches
+            X (``o``, ``h``, ``u``).
         Z : array-like or None
-            Selection regressors (required for ``'selection_prob'`` and ``'conditional'``).
-        kind : {'outcome', 'selection_prob', 'conditional'}, default ``'conditional'``
-            - ``'outcome'``        : ``X'beta`` (unconditional outcome mean).
-            - ``'selection_prob'`` : ``P(S = 1 | Z) = Phi(Z'gamma)``.
-            - ``'conditional'``    : ``E[Y | X, Z, S = 1] = X'beta + rho*sigma*lambda(Z'gamma)``.
+            Selection-equation regressors. Required if any requested code
+            touches Z (``s``, ``n``, ``p``, ``o``, ``u``).
+        kind : str or None, default ``None``
+            - ``None`` returns all six columns (= ``'snpohu'``) -- requires
+              both ``X`` and ``Z``.
+            - A letter string (any subset of ``'snpohu'``). A single letter
+              returns a 1-D ``ndarray``; multiple letters return a pandas
+              ``DataFrame`` whose columns are
+              ``['prob_selected', 'prob_not_selected', 'propensity', 'observed',
+              'hidden', 'unobserved']`` in the order requested.
+            - Backward-compatible long names ``'outcome'``,
+              ``'selection_prob'``, ``'conditional'`` continue to return
+              1-D ``ndarray``\\ s mapped to ``'h'``, ``'s'``, ``'o'``
+              respectively.
+
+        Returns
+        -------
+        ndarray or pandas.DataFrame
         """
         self._check_fitted()
-        if kind == "outcome":
-            if X is None:
-                raise ValueError("kind='outcome' requires X")
+
+        # Backward-compat long names -> single-letter codes.
+        long_to_letter = {
+            "outcome":         "h",
+            "selection_prob":  "s",
+            "conditional":     "o",
+        }
+        if isinstance(kind, str) and kind in long_to_letter:
+            return self.predict(X=X, Z=Z, kind=long_to_letter[kind])
+
+        if kind is None:
+            kind = "snpohu"
+        if not isinstance(kind, str):
+            raise TypeError(f"kind must be a string or None; got {type(kind).__name__}")
+        if not kind:
+            raise ValueError("kind is empty")
+
+        valid_letters = set("snpohu")
+        unknown = [c for c in kind if c not in valid_letters]
+        if unknown:
+            raise ValueError(
+                f"Unknown kind letter(s): {unknown}; valid letters: {sorted(valid_letters)}"
+            )
+        # De-duplicate, keep order.
+        seen: set[str] = set()
+        ordered = [c for c in kind if not (c in seen or seen.add(c))]
+
+        needs_x = any(c in "ohu" for c in ordered)
+        needs_z = any(c in "snpou" for c in ordered)
+        if needs_x and X is None:
+            raise ValueError(f"kind={kind!r} requires X (for letter(s) in 'ohu')")
+        if needs_z and Z is None:
+            raise ValueError(f"kind={kind!r} requires Z (for letter(s) in 'snpou')")
+
+        # Build the shared shorthand quantities once per call.
+        Xb = None
+        if needs_x:
             Xd = _prepare_predict_design(
-                X,
-                fit_intercept=self.fit_intercept,
+                X, fit_intercept=self.fit_intercept,
                 feature_names=self.outcome_feature_names_,
             )
-            return Xd @ self.coef_
-        if kind == "selection_prob":
-            if Z is None:
-                raise ValueError("kind='selection_prob' requires Z")
+            Xb = Xd @ self.coef_
+        Zg = None
+        Phi_Zg = None
+        phi_Zg = None
+        if needs_z:
             Zd = _prepare_predict_design(
-                Z,
-                fit_intercept=self.fit_intercept,
+                Z, fit_intercept=self.fit_intercept,
                 feature_names=self.selection_feature_names_,
             )
-            return norm.cdf(Zd @ self.gamma_)
-        if kind == "conditional":
-            if X is None or Z is None:
-                raise ValueError("kind='conditional' requires both X and Z")
-            Xd = _prepare_predict_design(
-                X,
-                fit_intercept=self.fit_intercept,
-                feature_names=self.outcome_feature_names_,
-            )
-            Zd = _prepare_predict_design(
-                Z,
-                fit_intercept=self.fit_intercept,
-                feature_names=self.selection_feature_names_,
-            )
-            lam = _inverse_mills(Zd @ self.gamma_)
-            return Xd @ self.coef_ + self.sigma_eu_ * lam
-        raise ValueError(
-            f"Unknown kind: {kind!r}; expected 'outcome', 'selection_prob', or 'conditional'."
-        )
+            Zg = Zd @ self.gamma_
+            Phi_Zg = norm.cdf(Zg)
+            phi_Zg = norm.pdf(Zg)
+
+        column_for: dict[str, np.ndarray] = {}
+        label_for = {
+            "s": "prob_selected",
+            "n": "prob_not_selected",
+            "p": "propensity",
+            "o": "observed",
+            "h": "hidden",
+            "u": "unobserved",
+        }
+
+        for c in ordered:
+            if c == "s":
+                column_for[c] = Phi_Zg
+            elif c == "n":
+                column_for[c] = 1.0 - Phi_Zg
+            elif c == "p":
+                column_for[c] = Zg
+            elif c == "h":
+                column_for[c] = Xb
+            elif c == "o":
+                # inverse Mills lam = phi/Phi  -- numerically stable variant.
+                lam = _inverse_mills(Zg)
+                column_for[c] = Xb + self.sigma_eu_ * lam
+            elif c == "u":
+                # 'unobserved' uses the lower-tail inverse-Mills phi/(1-Phi).
+                # Stabilised by working in -Zg (the upper tail of -Zg is
+                # the lower tail of Zg).
+                lam_minus = _inverse_mills(-Zg)
+                column_for[c] = Xb - self.sigma_eu_ * lam_minus
+
+        if len(ordered) == 1:
+            return column_for[ordered[0]]
+        cols = {label_for[c]: column_for[c] for c in ordered}
+        try:
+            import pandas as pd
+            return pd.DataFrame(cols)
+        except ImportError:  # pragma: no cover
+            return np.column_stack(list(cols.values()))
 
     # ------------------------------------------------------------------
     # Summary

@@ -128,6 +128,123 @@ def test_predict_invalid_kind_raises(heckit_data):
         m.predict(X=heckit_data["X"][:5], kind="nonsense")
 
 
+# ----------------------------------------------------------------------
+# Letter-string predict: six quantities via one-letter codes
+# ----------------------------------------------------------------------
+
+
+@pytest.fixture
+def fitted_for_predict(heckit_data):
+    return HeckitRegression(method="mle").fit(
+        heckit_data["y"], heckit_data["X"], heckit_data["Z"]
+    )
+
+
+def test_predict_default_returns_all_six(fitted_for_predict, heckit_data):
+    pd = pytest.importorskip("pandas")
+    m = fitted_for_predict
+    n = 6
+    df = m.predict(X=heckit_data["X"][:n], Z=heckit_data["Z"][:n])
+    assert isinstance(df, pd.DataFrame)
+    assert list(df.columns) == [
+        "prob_selected", "prob_not_selected", "propensity",
+        "observed", "hidden", "unobserved",
+    ]
+    assert df.shape == (n, 6)
+
+
+def test_predict_single_letter_returns_1d(fitted_for_predict, heckit_data):
+    m = fitted_for_predict
+    for letter in "snpohu":
+        kw = {}
+        if letter in "ohu":
+            kw["X"] = heckit_data["X"][:5]
+        if letter in "snpou":
+            kw["Z"] = heckit_data["Z"][:5]
+        arr = m.predict(kind=letter, **kw)
+        assert isinstance(arr, np.ndarray) and arr.shape == (5,), letter
+
+
+def test_predict_subset_returns_dataframe(fitted_for_predict, heckit_data):
+    pd = pytest.importorskip("pandas")
+    m = fitted_for_predict
+    df = m.predict(Z=heckit_data["Z"][:4], kind="sn")
+    assert isinstance(df, pd.DataFrame)
+    assert list(df.columns) == ["prob_selected", "prob_not_selected"]
+    # the two probabilities must sum to 1
+    np.testing.assert_allclose(df.sum(axis=1).to_numpy(), 1.0, atol=1e-12)
+
+
+def test_predict_legacy_names_back_compat(fitted_for_predict, heckit_data):
+    m = fitted_for_predict
+    X = heckit_data["X"][:5]
+    Z = heckit_data["Z"][:5]
+    # Legacy names should equal the corresponding letter-kind 1-D arrays.
+    np.testing.assert_allclose(
+        m.predict(X=X, kind="outcome"), m.predict(X=X, kind="h"), atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        m.predict(Z=Z, kind="selection_prob"), m.predict(Z=Z, kind="s"), atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        m.predict(X=X, Z=Z, kind="conditional"), m.predict(X=X, Z=Z, kind="o"),
+        atol=1e-12,
+    )
+
+
+def test_predict_formulas_against_direct_calc(fitted_for_predict, heckit_data):
+    """Verify each letter formula matches a direct computation."""
+    from scipy.stats import norm as _norm
+
+    m = fitted_for_predict
+    X = heckit_data["X"][:8]
+    Z = heckit_data["Z"][:8]
+    Xd = np.column_stack([np.ones(len(X)), X])
+    Zd = np.column_stack([np.ones(len(Z)), Z])
+    Xb = Xd @ m.coef_
+    Zg = Zd @ m.gamma_
+    Phi = _norm.cdf(Zg)
+    phi = _norm.pdf(Zg)
+
+    np.testing.assert_allclose(m.predict(Z=Z, kind="s"), Phi, atol=1e-12)
+    np.testing.assert_allclose(m.predict(Z=Z, kind="n"), 1 - Phi, atol=1e-12)
+    np.testing.assert_allclose(m.predict(Z=Z, kind="p"), Zg, atol=1e-12)
+    np.testing.assert_allclose(m.predict(X=X, kind="h"), Xb, atol=1e-12)
+    # observed conditional: X'b + rho*sigma * phi/Phi
+    np.testing.assert_allclose(
+        m.predict(X=X, Z=Z, kind="o"), Xb + m.sigma_eu_ * phi / Phi, atol=1e-12,
+    )
+    # unobserved conditional: X'b - rho*sigma * phi/(1 - Phi)
+    np.testing.assert_allclose(
+        m.predict(X=X, Z=Z, kind="u"), Xb - m.sigma_eu_ * phi / (1 - Phi), atol=1e-9,
+    )
+
+
+def test_predict_requires_X_for_outcome_letters(fitted_for_predict, heckit_data):
+    m = fitted_for_predict
+    Z = heckit_data["Z"][:5]
+    # Asking for any of o/h/u without X must fail.
+    with pytest.raises(ValueError, match="requires X"):
+        m.predict(Z=Z, kind="h")
+    with pytest.raises(ValueError, match="requires X"):
+        m.predict(Z=Z, kind="ohu")
+
+
+def test_predict_requires_Z_for_selection_letters(fitted_for_predict, heckit_data):
+    m = fitted_for_predict
+    X = heckit_data["X"][:5]
+    with pytest.raises(ValueError, match="requires Z"):
+        m.predict(X=X, kind="s")
+    with pytest.raises(ValueError, match="requires Z"):
+        m.predict(X=X, kind="ou")  # o and u both touch Z
+
+
+def test_predict_unknown_letter_raises(fitted_for_predict, heckit_data):
+    m = fitted_for_predict
+    with pytest.raises(ValueError, match="Unknown kind letter"):
+        m.predict(X=heckit_data["X"][:3], Z=heckit_data["Z"][:3], kind="xyz")
+
+
 def test_unfitted_predict_raises():
     m = HeckitRegression()
     with pytest.raises(RuntimeError, match="not been fitted"):
