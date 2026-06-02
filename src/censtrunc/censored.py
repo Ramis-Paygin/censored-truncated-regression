@@ -32,6 +32,7 @@ from . import _means
 from ._utils import (
     _classify_observations,
     _prepare_design_matrix,
+    _prepare_predict_design,
     _prepare_y,
     _resolve_thresholds,
 )
@@ -574,9 +575,10 @@ class CensoredRegression:
         ndarray or pandas.DataFrame
         """
         self._check_fitted()
-        X_design, _ = _prepare_design_matrix(
-            X, fit_intercept=self.fit_intercept,
-            feature_names=self._user_feature_names(),
+        X_design = _prepare_predict_design(
+            X,
+            fit_intercept=self.fit_intercept,
+            feature_names=self.feature_names_,
         )
         return _means.dispatch_predict(self, X_design, kind, default=_means.ALL_LETTERS_CENSORED)
 
@@ -790,9 +792,10 @@ class CensoredRegression:
         to arrays of length ``m``.
         """
         self._check_fitted()
-        X_design, _ = _prepare_design_matrix(
-            X, fit_intercept=self.fit_intercept,
-            feature_names=self._user_feature_names(),
+        X_design = _prepare_predict_design(
+            X,
+            fit_intercept=self.fit_intercept,
+            feature_names=self.feature_names_,
         )
         return _means.region_probabilities(
             self.coef_, self.sigma_, X_design,

@@ -84,6 +84,59 @@ def _prepare_design_matrix(
     return X_arr, columns
 
 
+def _prepare_predict_design(
+    X: ArrayLike,
+    *,
+    fit_intercept: bool,
+    feature_names: list[str],
+) -> np.ndarray:
+    """Build a design matrix that matches the model's training layout.
+
+    ``fit_intercept=True`` is the simple case: we just delegate to
+    ``_prepare_design_matrix`` which prepends a ``const`` column.
+
+    ``fit_intercept=False`` is more delicate. There are two sub-cases:
+
+    1. The model was fit on raw arrays without an intercept (``feature_names``
+       does not start with ``'const'``). The user's ``X`` should have exactly
+       the slope columns; we just pass it through.
+    2. The model was fit through ``from_formula``, which sets
+       ``fit_intercept=False`` but still emits a leading ``'const'`` column
+       from patsy. A natural ``predict(X_new)`` call from the user gives an
+       ``X_new`` with only the slope columns -- so we silently prepend
+       the constant here to keep the matmul shape right.
+
+    A user that *does* pass an X already including their own const column
+    (matching the trained width) hits case 1 above and we leave it alone.
+    """
+    X_arr, columns = _to_numpy(X, "X")
+    if X_arr.ndim == 1:
+        X_arr = X_arr.reshape(-1, 1)
+
+    if fit_intercept:
+        return _prepare_design_matrix(
+            X,
+            fit_intercept=True,
+            feature_names=feature_names[1:] if feature_names[:1] == ["const"] else feature_names,
+        )[0]
+
+    # fit_intercept=False
+    expected_cols = len(feature_names)
+    has_explicit_const = bool(feature_names) and feature_names[0] == "const"
+
+    if has_explicit_const and X_arr.shape[1] == expected_cols - 1:
+        intercept = np.ones((X_arr.shape[0], 1))
+        X_arr = np.hstack([intercept, X_arr])
+
+    if X_arr.shape[1] != expected_cols:
+        raise ValueError(
+            f"X has {X_arr.shape[1]} columns, but the model was fit on "
+            f"{expected_cols} columns ({feature_names}). Pass a frame whose "
+            f"columns match the slope regressors {feature_names[1:] if has_explicit_const else feature_names}."
+        )
+    return X_arr
+
+
 def _prepare_y(y: ArrayLike, n_expected: int) -> np.ndarray:
     """Validate y and return as 1-D numpy array."""
     y_arr, _ = _to_numpy(y, "y")

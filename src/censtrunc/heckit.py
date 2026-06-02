@@ -51,7 +51,7 @@ from scipy.optimize import minimize
 from scipy.special import log_ndtr
 from scipy.stats import norm
 
-from ._utils import _prepare_design_matrix, _prepare_y
+from ._utils import _prepare_design_matrix, _prepare_predict_design, _prepare_y
 
 
 # ----------------------------------------------------------------------
@@ -596,29 +596,33 @@ class HeckitRegression:
         if kind == "outcome":
             if X is None:
                 raise ValueError("kind='outcome' requires X")
-            Xd, _ = _prepare_design_matrix(
-                X, fit_intercept=self.fit_intercept,
-                feature_names=self._user_outcome_names(),
+            Xd = _prepare_predict_design(
+                X,
+                fit_intercept=self.fit_intercept,
+                feature_names=self.outcome_feature_names_,
             )
             return Xd @ self.coef_
         if kind == "selection_prob":
             if Z is None:
                 raise ValueError("kind='selection_prob' requires Z")
-            Zd, _ = _prepare_design_matrix(
-                Z, fit_intercept=self.fit_intercept,
-                feature_names=self._user_selection_names(),
+            Zd = _prepare_predict_design(
+                Z,
+                fit_intercept=self.fit_intercept,
+                feature_names=self.selection_feature_names_,
             )
             return norm.cdf(Zd @ self.gamma_)
         if kind == "conditional":
             if X is None or Z is None:
                 raise ValueError("kind='conditional' requires both X and Z")
-            Xd, _ = _prepare_design_matrix(
-                X, fit_intercept=self.fit_intercept,
-                feature_names=self._user_outcome_names(),
+            Xd = _prepare_predict_design(
+                X,
+                fit_intercept=self.fit_intercept,
+                feature_names=self.outcome_feature_names_,
             )
-            Zd, _ = _prepare_design_matrix(
-                Z, fit_intercept=self.fit_intercept,
-                feature_names=self._user_selection_names(),
+            Zd = _prepare_predict_design(
+                Z,
+                fit_intercept=self.fit_intercept,
+                feature_names=self.selection_feature_names_,
             )
             lam = _inverse_mills(Zd @ self.gamma_)
             return Xd @ self.coef_ + self.sigma_eu_ * lam

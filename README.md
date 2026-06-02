@@ -135,6 +135,7 @@ common needs have no production-quality estimator behind them.
 | **lifelines** | left-censored Weibull / log-normal AFT regressions | — | — | A survival framework: coefficients have hazard-ratio interpretations, and a non-zero left threshold is awkward to express. |
 | **scikit-survival** (`sksurv`) | right-censored only, AFT-style | — | — | Same survival framing as `lifelines`. |
 | **py4etrics** (`0.1.9`) | `Tobit` with arbitrary `left` / `right` | `Truncreg` with arbitrary `left` / `right` | `Heckit` two-step only (`method='mle'` is silently ignored) | An educational package by Hasebe et al.; no marginal effects, no LR test, no formula support, no Heckit MLE. |
+| **stnwanekezie/TobitRegression** (GitHub, MIT) | a single `Tobit` class subclassing `statsmodels.OLS`, supports arbitrary `left` / `right` via Olsen's reparameterisation | — | — | A 425-line script; `summary()` only, no marginal effects, no LR test, no formula API, no truncated/Heckit cases. |
 | **PyMC / bambi** | Bayesian censored regression via `Censored` | Bayesian truncated regression via `Truncated` | possible to hand-code | Bayesian / MCMC route. |
 | **marginaleffects** (Python) | — | — | — | A general-purpose slopes / contrasts toolkit, not a model-fitting library. |
 

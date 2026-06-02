@@ -27,7 +27,12 @@ from scipy.stats import chi2, norm
 
 from . import _likelihood as _llf
 from . import _means
-from ._utils import _prepare_design_matrix, _prepare_y, _resolve_thresholds
+from ._utils import (
+    _prepare_design_matrix,
+    _prepare_predict_design,
+    _prepare_y,
+    _resolve_thresholds,
+)
 
 
 @dataclass
@@ -484,9 +489,10 @@ class TruncatedRegression:
               backward compatibility and return a 1-D ``ndarray``.
         """
         self._check_fitted()
-        X_design, _ = _prepare_design_matrix(
-            X, fit_intercept=self.fit_intercept,
-            feature_names=self._user_feature_names(),
+        X_design = _prepare_predict_design(
+            X,
+            fit_intercept=self.fit_intercept,
+            feature_names=self.feature_names_,
         )
         return _means.dispatch_predict(self, X_design, kind, default=_means.ALL_LETTERS_TRUNCATED)
 

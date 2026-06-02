@@ -181,6 +181,63 @@ def test_truncated_formula_margeff_excludes_const():
     assert ame.names == ["x1", "x2"]
 
 
+def test_censored_formula_predict_accepts_user_X(censored_df):
+    """Regression guard: after a ``from_formula`` fit, ``predict(X_new)`` must
+    accept an ``X_new`` that has only the slope columns. Previously the call
+    failed because the model's design matrix has an explicit ``const`` column
+    while the user-supplied ``X_new`` does not."""
+    df = censored_df
+    m = CensoredRegression.from_formula(
+        "lwage ~ 1 + educ + exper + expersq", data=df, left=0.0,
+    ).fit()
+    preds = m.predict(df[["educ", "exper", "expersq"]].iloc[:5])
+    assert preds.shape[0] == 5
+    # latent column matches an explicit X'beta computation
+    X_with_const = np.column_stack([np.ones(5), df[["educ", "exper", "expersq"]].iloc[:5].to_numpy()])
+    np.testing.assert_allclose(preds["latent"].to_numpy(), X_with_const @ m.coef_, atol=1e-12)
+
+
+def test_truncated_formula_predict_accepts_user_X():
+    rng = np.random.default_rng(0)
+    n = 1500
+    df = pd.DataFrame({"x1": rng.normal(size=n), "x2": rng.normal(size=n)})
+    df["y"] = 1.0 + 0.5*df["x1"] - 0.3*df["x2"] + rng.normal(size=n)
+    df = df[(df["y"] > 0) & (df["y"] < 2.5)]
+    m = TruncatedRegression.from_formula(
+        "y ~ 1 + x1 + x2", data=df, left=0.0, right=2.5,
+    ).fit()
+    preds = m.predict(df[["x1", "x2"]].iloc[:5])
+    assert "latent" in preds.columns and "truncated" in preds.columns
+
+
+def test_heckit_formula_predict_accepts_user_X():
+    rng = np.random.default_rng(42)
+    n = 3000
+    df = pd.DataFrame({
+        "shared": rng.normal(size=n),
+        "x_only": rng.normal(size=n),
+        "z_only": rng.normal(size=n),
+    })
+    cov = np.array([[1.0, 0.5], [0.5, 1.0]])
+    e, u = rng.multivariate_normal([0, 0], cov, size=n).T
+    df["inlf"] = (0.1 + 0.3*df["shared"] + 0.6*df["z_only"] + u > 0).astype(int)
+    df["lwage"] = 1.0 + 0.5*df["shared"] - 0.3*df["x_only"] + e
+    m = HeckitRegression.from_formula(
+        outcome="lwage ~ 1 + shared + x_only",
+        selection="inlf  ~ 1 + shared + z_only",
+        data=df, method="mle",
+    ).fit()
+    # User-supplied X / Z without 'const' columns must just work.
+    y_cond = m.predict(
+        X=df[["shared", "x_only"]].iloc[:5],
+        Z=df[["shared", "z_only"]].iloc[:5],
+        kind="conditional",
+    )
+    assert y_cond.shape == (5,)
+    p_sel = m.predict(Z=df[["shared", "z_only"]].iloc[:5], kind="selection_prob")
+    assert p_sel.shape == (5,) and np.all((0 <= p_sel) & (p_sel <= 1))
+
+
 def test_heckit_formula_margeff_excludes_const():
     rng = np.random.default_rng(42)
     n = 3000
