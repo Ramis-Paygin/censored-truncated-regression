@@ -113,12 +113,66 @@ thresholds and no observations are reported there).
   intervals, AIC/BIC, McFadden's pseudo-$R^2$, overall LR test, and per-region
   censoring counts. `HeckitRegression.summary()` prints separate blocks for the
   outcome and selection equations and reports the joint $\rho$ and $\sigma$.
-- **Cross-validation against multiple external references** in the test suite:
+- **Cross-validation against external references** in the test suite:
   OLS-equivalence in the no-censoring limit; **probit-equivalence** when
-  $L\!\approx\!R$ (the censored MLE collapses to a probit on
-  $\mathbf 1\{Y^* > c\}$); R's `survival::survreg` and `truncreg::truncreg`;
-  Python's `py4etrics.Heckit` (two-step); an independent base-R Heckit MLE
-  (`glm(probit)` + `optim()` on the joint log-likelihood).
+  $L \approx R$ (the censored MLE reduces to a probit on $\mathbf 1\{Y^* > c\}$);
+  R's `survival::survreg`, `truncreg::truncreg`, and
+  `sampleSelection::selection` (two-step + joint MLE) for Heckit;
+  Python's `py4etrics.Heckit` for the two-step.
+
+## What's already available in Python (and what isn't)
+
+Before writing `censtrunc` we surveyed the existing Python options for the
+three model families it covers. The short version: the Python landscape for
+censored / truncated / Heckman models is patchy compared to R, and several
+common needs have no production-quality estimator behind them.
+
+| Package | Censored / Tobit | Truncated | Heckit | Notes |
+|---------|------------------|-----------|--------|-------|
+| **statsmodels** (`0.14`) | no public Tobit class | no public truncated regression | not implemented | Has Probit, Logit, OLS, GLM, robust regression; Tobit-family models are the documented gap. |
+| **scikit-learn** | — | — | — | No limited-dependent-variable models. |
+| **linearmodels** | — | — | — | Panel / IV / GMM specialist. |
+| **lifelines** | left-censored Weibull / log-normal AFT regressions | — | — | A survival framework: coefficients have hazard-ratio interpretations, and a non-zero left threshold is awkward to express. |
+| **scikit-survival** (`sksurv`) | right-censored only, AFT-style | — | — | Same survival framing as `lifelines`. |
+| **py4etrics** (`0.1.9`) | `Tobit` with arbitrary `left` / `right` | `Truncreg` with arbitrary `left` / `right` | `Heckit` two-step only (`method='mle'` is silently ignored) | An educational package by Hasebe et al.; no marginal effects, no LR test, no formula support, no Heckit MLE. |
+| **PyMC / bambi** | Bayesian censored regression via `Censored` | Bayesian truncated regression via `Truncated` | possible to hand-code | Bayesian / MCMC route. |
+| **marginaleffects** (Python) | — | — | — | A general-purpose slopes / contrasts toolkit, not a model-fitting library. |
+
+R has all of these covered out of the box: `survival::survreg` (wrapped by
+`AER::tobit`) for the censored case, `truncreg::truncreg` for the truncated
+case, and `sampleSelection::selection` for both Heckit estimators.
+
+### What `censtrunc` adds
+
+- A single censored MLE that handles **arbitrary $L$ and $R$ thresholds**
+  (left-only, right-only, or two-sided), with Olsen's globally concave
+  reparameterisation so the optimiser is guaranteed to find the unique
+  maximum.
+- A matching truncated MLE for **two-sided truncation**, which is what you
+  need when survey or administrative data only records observations inside
+  a window.
+- A Heckman selection estimator with **both** the two-step and the joint
+  MLE (matching `sampleSelection::selection`), bootstrap SEs for the
+  two-step, and a `summary()` that prints both equation blocks plus the
+  estimated $\rho$ and $\sigma$.
+- A unified `predict()` returning any combination of six quantities (three
+  conditional means + three region probabilities) via a one-letter `kind`
+  string.
+- A `get_margeff()` mirroring statsmodels' API for all three estimators,
+  including the four Heckman-specific kinds (`latent`, `conditional`,
+  `unconditional`, `prob-selected`) and the three region-probability kinds
+  for the censored model.
+- A `lr_test()` that accepts statsmodels-style hypothesis strings
+  (`'(x1 = 0), (x2 = x3)'`, `'x1 - 2*x2 = 0'`, ...) as well as two-model
+  comparisons.
+- Cross-validated in the test suite against `statsmodels.OLS` (no-censoring
+  and probit limits), `survival::survreg`, `truncreg::truncreg`,
+  `sampleSelection::selection`, and `py4etrics.Heckit`.
+
+If your problem is the classical left-censored-at-zero Tobit, `py4etrics.Tobit`
+will work too; `censtrunc` is aimed at what's missing elsewhere — two-sided
+thresholds, joint-MLE Heckit, marginal effects, LR tests, and patsy formulas
+on all three model classes.
 
 ## Installation
 

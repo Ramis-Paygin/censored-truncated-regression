@@ -1,23 +1,30 @@
-"""Cross-validate against R: ``survival::survreg``, ``truncreg::truncreg``,
-and a base-R Heckman selection fit (probit + augmented OLS + ``optim``-based
-joint MLE).
+"""Cross-validate against canonical R references:
 
-These tests run only when R is installed *and* exposes the required packages
-(otherwise they are skipped, so the suite stays green in environments without
-R). The R scripts live in ``tests/reference/fit_tobit.R`` and ``fit_heckit.R``.
+- ``survival::survreg`` for the censored model (the engine behind
+  ``AER::tobit``);
+- ``truncreg::truncreg`` for the truncated model;
+- ``sampleSelection::selection`` (Toomet & Henningsen, JSS 27(7), 2008) for
+  the Heckman selection model -- the standard Heckit reference in R, with
+  both two-step and joint-MLE estimators implemented on the very
+  log-likelihood we use in ``censtrunc/heckit.py``.
 
-The comparison protocol avoids cross-language RNG mismatches: Python generates
-the data, writes it to a temporary CSV, R reads that exact CSV and fits its
-models, and the coefficient sets are compared. Tobit, truncated, and Heckit
-estimators are different parameterisations of the same MLE, so agreement to
-six-plus decimals validates the Python implementation against a mature R
-reference -- independently of this package's optimiser or its likelihood code.
+These tests run only when R is installed and exposes the required packages
+(otherwise they are skipped). The R scripts live in
+``tests/reference/fit_tobit.R`` and ``fit_heckit.R``.
 
-For Heckit we deliberately avoid the ``sampleSelection`` package because its
-dependency chain (``nloptr``/``lme4``/``car``) fails to compile on Apple
-Silicon and several Linux distros. Instead we hand-roll the same likelihood
-in base R + ``optim``, giving us an R-side optimiser that is structurally
-independent of ours.
+The comparison protocol avoids cross-language RNG mismatches: Python
+generates the data, writes it to a temporary CSV, R reads that exact CSV and
+fits its models, and the coefficient sets are compared. Tobit, truncated,
+and Heckit estimators are different parameterisations of the same MLE, so
+agreement to six-plus decimals validates the Python implementation against
+a mature R reference -- independently of this package's optimiser or its
+likelihood code.
+
+Installation note (macOS Apple Silicon): ``sampleSelection`` depends on
+``nloptr``, which compiles from source and needs ``cmake`` plus the system
+``nlopt`` library. On a Homebrew R install,
+``brew install nlopt cmake pkg-config`` once, then
+``install.packages('sampleSelection', dependencies = TRUE)`` succeeds.
 """
 
 from __future__ import annotations
@@ -37,11 +44,15 @@ R_HECKIT_SCRIPT = Path(__file__).parent / "reference" / "fit_heckit.R"
 LEFT, RIGHT = 0.0, 2.5
 
 
-def _r_available() -> bool:
-    """True if Rscript and the needed packages (survival, truncreg, jsonlite) exist."""
+def _r_packages_available(pkgs: tuple[str, ...]) -> bool:
+    """True if Rscript exists and every package in ``pkgs`` is installed."""
     if shutil.which("Rscript") is None:
         return False
-    probe = "quit(status = if (all(c('survival','truncreg','jsonlite') %in% rownames(installed.packages()))) 0 else 1)"
+    probe = (
+        "quit(status = if (all(c("
+        + ",".join(repr(p) for p in pkgs)
+        + ") %in% rownames(installed.packages()))) 0 else 1)"
+    )
     try:
         res = subprocess.run(
             ["Rscript", "-e", probe], capture_output=True, timeout=60, check=False
@@ -49,6 +60,15 @@ def _r_available() -> bool:
         return res.returncode == 0
     except Exception:  # pragma: no cover - environment dependent
         return False
+
+
+_TOBIT_PKGS = ("survival", "truncreg", "jsonlite")
+_HECKIT_PKGS = ("sampleSelection", "jsonlite")
+
+
+# Backwards-compat shim used by the tobit/truncreg tests below.
+def _r_available() -> bool:
+    return _r_packages_available(_TOBIT_PKGS)
 
 
 pytestmark = pytest.mark.skipif(
@@ -167,10 +187,17 @@ def _fit_pair(csv_path: Path):
     return y, X, Z
 
 
+_heckit_skip = pytest.mark.skipif(
+    not _r_packages_available(_HECKIT_PKGS),
+    reason="R with package sampleSelection is required for the Heckit reference",
+)
+
+
+@_heckit_skip
 def test_heckit_twostep_matches_R(heckit_csv):
-    """censtrunc two-step and base-R two-step solve the *same* closed-form
-    Heckman expressions, so they should agree to machine precision modulo
-    numpy/R linear-algebra differences (~1e-6)."""
+    """censtrunc two-step and sampleSelection two-step solve the same
+    closed-form Heckman expressions, so they should agree to numpy/R
+    linear-algebra precision (~1e-6)."""
     ref = _run_r_heckit(heckit_csv)["twostep"]
     r_beta = np.array([ref["outcome"]["(Intercept)"], ref["outcome"]["x1"], ref["outcome"]["x2"]])
     r_gamma = np.array([
@@ -187,10 +214,11 @@ def test_heckit_twostep_matches_R(heckit_csv):
     assert abs(m.rho_ - ref["rho"]) < 1e-4
 
 
+@_heckit_skip
 def test_heckit_mle_matches_R(heckit_csv):
-    """censtrunc MLE (scipy L-BFGS-B) vs an independent R optimiser on the
-    *same* likelihood: any disagreement past optimiser tolerance would imply
-    a bug in one implementation."""
+    """censtrunc MLE (scipy L-BFGS-B) vs sampleSelection MLE (its own
+    `maxLik` optimiser) on the same likelihood: any disagreement past
+    optimiser tolerance would imply a bug in one implementation."""
     ref = _run_r_heckit(heckit_csv)["mle"]
     r_beta = np.array([ref["outcome"]["(Intercept)"], ref["outcome"]["x1"], ref["outcome"]["x2"]])
     r_gamma = np.array([

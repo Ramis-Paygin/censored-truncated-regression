@@ -57,8 +57,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (`tests/test_validation.py::test_censored_reduces_to_probit_at_tight_thresholds`).
   - R cross-references run when R is available: `survival::survreg` (the
     estimator behind `AER::tobit`) and `truncreg::truncreg` for the censored
-    and truncated models; an independent base-R Heckit MLE (probit + `optim`
-    on the joint log-likelihood, no `sampleSelection` required) for Heckit
+    and truncated models; `sampleSelection::selection` (the standard Heckit
+    package in R, Toomet & Henningsen 2008) for Heckit, covering both the
+    two-step and the joint-MLE estimators
     (`tests/reference/fit_tobit.R`, `tests/reference/fit_heckit.R`).
   - Python cross-reference: `py4etrics.Heckit` two-step matches censtrunc to
     machine precision (`tests/test_heckit.py::test_twostep_matches_py4etrics`).

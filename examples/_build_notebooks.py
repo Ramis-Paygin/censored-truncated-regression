@@ -510,10 +510,9 @@ def _build_validation_notebook() -> nbf.NotebookNode:
             "print(f'|loglik_censored - loglik_OLS|  = {abs(cens.llf_ - ols.llf):.2e}')"
         ),
         _md(
-            "All discrepancies are at the level of the optimiser tolerance — the"
-            " estimator behaves exactly as theory requires in the no-censoring"
-            " limit, which is strong evidence the likelihood and its optimisation"
-            " are implemented correctly."
+            "All discrepancies are at the level of the optimiser tolerance. The"
+            " estimator reduces to OLS in the no-censoring limit, as it should,"
+            " so the likelihood and its optimisation are wired up correctly."
         ),
         _md(
             "## With censoring: agreement with R, disagreement with OLS\n"
@@ -645,10 +644,8 @@ def _build_validation_notebook() -> nbf.NotebookNode:
             "As the band shrinks, the tobit-to-probit ratio approaches the probit"
             " estimate. The intercept drifts more than the slopes — a finite-band"
             " effect that scales like $\\varepsilon/\\sigma$ — but at $\\varepsilon"
-            " = 0.05$ the slopes agree to a couple percent. This independently"
-            " validates the censored log-likelihood and its normalisation: a bug"
-            " in the boundary terms of $\\ell$ would manifest as a discrepancy"
-            " here, but does not."
+            " = 0.05$ the slopes agree to within a few percent, which checks the"
+            " boundary terms of $\\ell$ separately from the OLS limit above."
         ),
     ]
     nb["cells"] = cells
@@ -795,8 +792,8 @@ def _build_heckit_notebook() -> nbf.NotebookNode:
             " 'self-select' into the sample (think wages — observed only for"
             " those who work) and that selection is correlated with the outcome"
             " error, OLS on the selected subsample is biased. Heckman (1979)"
-            " introduced a two-step correction; the joint maximum-likelihood"
-            " estimator is its asymptotically efficient sibling.\n"
+            " gives a two-step correction; the joint maximum-likelihood"
+            " estimator is the asymptotically efficient alternative.\n"
             "\n"
             "Model:\n"
             "\n"
@@ -912,27 +909,28 @@ def _build_heckit_notebook() -> nbf.NotebookNode:
             "}, index=['rho', 'sigma']).round(4)"
         ),
         _md(
-            "## Cross-validation against `py4etrics` and a base-R reference\n"
+            "## Cross-validation against `py4etrics` and R's `sampleSelection`\n"
             "\n"
-            "Recovering the true DGP is necessary but not sufficient — a buggy"
-            " estimator that returns *any* sensible-looking numbers would also pass"
-            " that bar. The decisive check is replication of an independent"
+            "Recovering the true DGP is a necessary but not sufficient check — a"
+            " buggy estimator could return sensible-looking numbers and still"
+            " pass it. The decisive test is replication of an *independent*"
             " implementation on the *same* data. We compare against two:\n"
             "\n"
-            "- **`py4etrics.Heckit`** (Hasebe et al., the Japanese package the"
-            " review suggested) — closed-form two-step Heckman in Python.\n"
-            "- A **base-R reference** (`glm(probit)` + augmented OLS for two-step;"
-            " `optim` on the joint log-likelihood for MLE) — see"
-            " `tests/reference/fit_heckit.R`. We deliberately avoid the"
-            " `sampleSelection` package because its dependency chain"
-            " (`nloptr`/`lme4`/`car`) fails to compile on Apple Silicon and"
-            " several Linux distros; hand-rolling the same likelihood in R gives"
-            " us an optimiser that is structurally independent of ours.\n"
+            "- **`py4etrics.Heckit`** (Hasebe et al.) — a Python implementation of"
+            " the closed-form two-step Heckman estimator.\n"
+            "- **`sampleSelection::selection`** (Toomet & Henningsen, JSS 27(7),"
+            " 2008) — the standard Heckit package in R, with both estimators"
+            " (two-step and joint MLE) implemented on the same log-likelihood we"
+            " use.\n"
             "\n"
-            "Both checks run as part of the test suite\n"
+            "Both checks are run as part of the test suite\n"
             "(`tests/test_heckit.py::test_twostep_matches_py4etrics` and\n"
             "`tests/test_r_reference.py::test_heckit_mle_matches_R`). The cells"
-            " below reproduce them live."
+            " below reproduce them live.\n"
+            "\n"
+            "If `sampleSelection` is not installed locally, on macOS Apple Silicon"
+            " run `brew install nlopt cmake pkg-config` once and then"
+            " `install.packages('sampleSelection', dependencies = TRUE)`."
         ),
         _code(
             "# Compare with py4etrics (two-step only -- py4etrics MLE is a no-op).\n"
@@ -952,15 +950,15 @@ def _build_heckit_notebook() -> nbf.NotebookNode:
             "    print('py4etrics not installed; pip install py4etrics to enable the comparison.')"
         ),
         _md(
-            "Both packages solve the same closed-form Heckman expressions, so"
-            " agreement to $\\sim 10^{-6}$ is essentially numpy/statsmodels"
-            " linear-algebra round-off."
+            "Both packages solve the same closed-form two-step expressions, so"
+            " the residual disagreement (around $10^{-6}$) is just numpy /"
+            " statsmodels linear-algebra round-off."
         ),
         _code(
-            "# Compare with the base-R reference (probit + augmented OLS + optim MLE).\n"
+            "# Compare with R's sampleSelection::selection (joint MLE).\n"
             "# The R script expects a CSV with columns (y, s, x1, x2, z1, z2) and fits\n"
-            "# outcome 'y ~ x1 + x2' / selection 's ~ x1 + x2 + z1 + z2', so we use a\n"
-            "# fresh DGP that matches this layout exactly.\n"
+            "# outcome 'y ~ x1 + x2' / selection 's ~ x1 + x2 + z1 + z2', so we build\n"
+            "# a fresh DGP with that exact layout.\n"
             "import shutil, subprocess, json, tempfile, os\n"
             "from pathlib import Path\n"
             "\n"
@@ -1018,11 +1016,9 @@ def _build_heckit_notebook() -> nbf.NotebookNode:
             "    print('Rscript not available at build time; see tests/test_r_reference.py for the gated test.')"
         ),
         _md(
-            "Two independent optimisers (scipy `L-BFGS-B` and R `optim`) on the"
-            " same joint log-likelihood: the parameters, the variance/correlation"
-            " and the log-likelihood all agree to optimiser tolerance ($\\sim"
-            "10^{-3}$). Any structural bug in our likelihood code would surface"
-            " as a *systematic* offset here, not a tolerance-level discrepancy."
+            "Two independent optimisers (scipy `L-BFGS-B` and R's `maxLik`) on"
+            " the same joint log-likelihood: parameters, $\\sigma$, $\\rho$ and"
+            " the log-likelihood all match to optimiser tolerance (~$10^{-3}$)."
         ),
         _md(
             "## Three kinds of prediction\n"
@@ -1094,9 +1090,10 @@ def _build_heckit_notebook() -> nbf.NotebookNode:
             "| `'prob-selected'` | $P(S=1\\mid Z) = \\Phi(Z'\\gamma)$ — Z-side only                          |\n"
             "\n"
             "A variable that appears in *both* equations (here `shared`) has its X-"
-            " and Z-side derivatives **added together**. SEs use the delta method"
-            " on the joint MLE covariance; for a two-step fit they would be `NaN`"
-            " (bootstrap is the right tool there).\n"
+            " and Z-side derivatives **added together**. SEs come from the delta"
+            " method on the joint MLE covariance; for a two-step fit they are"
+            " `NaN` because the joint covariance is not available in closed form"
+            " (use bootstrap instead).\n"
             "\n"
             "Closed-form per-row derivatives with $\\lambda = \\phi/\\Phi$ and"
             " $\\delta(t) = \\lambda(t)(t + \\lambda(t))$ (so $\\mathrm d\\lambda/\\mathrm dt"
@@ -1145,12 +1142,12 @@ def _build_heckit_notebook() -> nbf.NotebookNode:
             " $\\phi(Z'\\gamma)$."
         ),
         _md(
-            "**Cross-check via finite differences of `predict`.** The strongest"
-            " correctness test: read our derivative formulas (in"
-            " `_heckit_effects.py`) and our `predict()` code (in `heckit.py`) as"
-            " *independent* sources of the same quantity, then verify they agree."
-            " Below we pick the conditional mean at $X=\\bar X, Z=\\bar Z$ and"
-            " perturb each regressor with a central difference."
+            "**Cross-check via finite differences of `predict`.** The derivative"
+            " formulas in `_heckit_effects.py` and the prediction code in"
+            " `heckit.py` are written separately, so a central finite difference"
+            " of `predict()` is an independent check of the analytic dy/dx."
+            " Below we evaluate at $X = \\bar X$, $Z = \\bar Z$ and perturb each"
+            " regressor."
         ),
         _code(
             "h = 1e-4\n"
