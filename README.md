@@ -100,14 +100,25 @@ thresholds and no observations are reported there).
   `at='mean'` = MEM, plus `'median'`/`'zero'`) and *what* to report
   (`method='dydx'` derivative, or `'eyex'`/`'dyex'`/`'eydx'` elasticities), with
   discrete-variable handling (`dummy=True`) and **delta-method standard errors**.
-  `ame()` and `mem()` are provided as convenient shorthands.
+  `ame()` and `mem()` are provided as convenient shorthands. `HeckitRegression`
+  also exposes `get_margeff` with the four Heckman quantities (`latent`,
+  `conditional`, `unconditional`, `prob-selected`); variables that appear in
+  both the outcome and selection equations (matched by feature name) have their
+  X-side and Z-side derivatives combined automatically.
 - **Likelihood-ratio test** (`lr_test`) for any pair of nested models, plus
   `model.lr_test(hypotheses)` for linear restrictions specified as a
   statsmodels-style hypothesis string (`'(x1 = 0), (x2 = x3)'`,
   `'2*x1 + x4 = 1'`, ...) or as `(R, r)` arrays.
 - **statsmodels-style `summary()`** with coefficient table, Wald confidence
   intervals, AIC/BIC, McFadden's pseudo-$R^2$, overall LR test, and per-region
-  censoring counts.
+  censoring counts. `HeckitRegression.summary()` prints separate blocks for the
+  outcome and selection equations and reports the joint $\rho$ and $\sigma$.
+- **Cross-validation against multiple external references** in the test suite:
+  OLS-equivalence in the no-censoring limit; **probit-equivalence** when
+  $L\!\approx\!R$ (the censored MLE collapses to a probit on
+  $\mathbf 1\{Y^* > c\}$); R's `survival::survreg` and `truncreg::truncreg`;
+  Python's `py4etrics.Heckit` (two-step); an independent base-R Heckit MLE
+  (`glm(probit)` + `optim()` on the joint log-likelihood).
 
 ## Installation
 
@@ -294,7 +305,7 @@ the number of restrictions.
 | `MarginalEffects`            | Returned by `.ame()` / `.mem()`; has `.to_dataframe()` |
 | `LRTestResult`               | Returned by `lr_test`                                 |
 
-Fitted-model attributes (both estimators):
+Fitted-model attributes (censored and truncated):
 
 | Attribute            | Description                                              |
 |----------------------|----------------------------------------------------------|
@@ -306,12 +317,19 @@ Fitted-model attributes (both estimators):
 | `llr_`, `llr_pvalue_`| Overall LR statistic and p-value                          |
 | `prsquared_`         | McFadden's pseudo-$R^2$                                   |
 | `aic_`, `bic_`       | Information criteria                                      |
-| `n_left_censored_`, `n_right_censored_`, `n_uncensored_` | Region counts |
+| `n_left_censored_`, `n_right_censored_`, `n_uncensored_` | Region counts (censored only) |
 | `diagnostics_`       | Optimiser convergence message and iteration count         |
+
+`HeckitRegression` has the same `coef_` / `sigma_` / `bse_` / `pvalues_` (for
+the outcome equation) plus selection-equation analogues `gamma_`, `bse_gamma_`,
+`pvalues_gamma_`, the joint correlation `rho_`, the Heckman covariance term
+`sigma_eu_` (= $\rho\sigma$), and `n_obs_` / `n_selected_`. After a
+`method='mle'` fit the joint covariance `cov_params_` is also exposed (used by
+`get_margeff` for delta-method SEs).
 
 ## Examples
 
-The `examples/` directory contains three executed Jupyter notebooks:
+The `examples/` directory contains **six** executed Jupyter notebooks:
 
 1. **`01_two_sided_censoring.ipynb`** — the headline use case: two-sided
    censoring on simulated data, with histograms, predictions, AME/MEM, and
@@ -321,11 +339,16 @@ The `examples/` directory contains three executed Jupyter notebooks:
    comparison against OLS.
 3. **`03_truncated_regression.ipynb`** — truncated regression on simulated
    data, showing the OLS bias.
-4. **`04_validation.ipynb`** — equivalence with OLS in the no-censoring limit
-   plus a live comparison against R's `survreg` / `truncreg`.
+4. **`04_validation.ipynb`** — equivalence with OLS in the no-censoring limit,
+   the probit limit at tight thresholds ($L \approx R$), plus a live
+   comparison against R's `survreg` / `truncreg`.
 5. **`05_truncated_vs_censored_visual.ipynb`** — side-by-side plot of fits
    under truncation and censoring, with an asymptotic prediction band
    (frequentist analogue of the pymc-devs GLM-truncated-censored figure).
+6. **`06_heckit.ipynb`** — Heckman sample-selection (Heckit) on a simulated
+   DGP and on the canonical Mroz (1987) wage data, including cross-validation
+   against `py4etrics` and a base-R reference, marginal effects for all four
+   Heckit `kind`s, and a finite-difference check of the derivative formulas.
 
 Rebuild the notebooks from source with
 
@@ -357,15 +380,22 @@ pytest                                 # full suite
 pytest -m "not slow"                   # skip Monte Carlo tests
 ```
 
-The test suite covers:
+The test suite (~120 tests, run in well under a minute on a laptop) covers:
 
 - Smoke tests for all four supported configurations (left-only, right-only,
-  both, truncated).
+  both, truncated) on all three estimators.
 - Recovery of true parameters on simulated data within a few standard errors.
 - Analytical gradient matches finite-difference gradient (catches sign errors
   in the closed-form derivative expressions).
 - LR test correctly rejects irrelevant restrictions and accepts true ones.
-- Predictions and marginal effects in the right shape and direction.
+- Predictions and marginal effects in the right shape and direction, including
+  a finite-difference cross-check between `get_margeff` and `predict` for the
+  Heckman model.
+- **Cross-validation against external implementations**: OLS equivalence in
+  the no-censoring limit; probit equivalence in the narrow-band limit; R's
+  `survival::survreg` and `truncreg::truncreg` (gated on R availability);
+  `py4etrics.Heckit` two-step; a base-R Heckit MLE (`glm(probit)` + `optim()`
+  on the joint log-likelihood).
 - Input validation (NaN handling, threshold ordering, etc.).
 - Monte Carlo (marked `slow`) confirming approximate unbiasedness over 60
   repetitions.

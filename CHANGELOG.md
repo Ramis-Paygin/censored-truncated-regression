@@ -46,10 +46,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `prob-interior`, and `prob-right` to report marginal effects on the
   probability of each region (P(Y=L), P(L<Y<R), P(Y=R)); these three effects
   sum to zero by construction.
-- Validation tests: in the no-censoring limit the estimator reproduces OLS
-  (coefficients, MLE scale, and log-likelihood) to optimiser tolerance, checked
-  against `statsmodels.OLS`; an optional comparison against R's `AER::tobit`
-  and `truncreg` runs when R is available (`tests/test_r_reference.py`).
+- Validation tests:
+  - In the no-censoring limit the estimator reproduces OLS (coefficients, MLE
+    scale, and log-likelihood) to optimiser tolerance, checked against
+    `statsmodels.OLS`.
+  - In the **probit limit** ($L \approx R$) the censored MLE collapses to a
+    probit on $\mathbf 1\{Y^* > c\}$, with
+    $\hat\beta_{\text{tobit}}/\hat\sigma_{\text{tobit}} \to
+    \hat\beta_{\text{probit}}$ as the band shrinks
+    (`tests/test_validation.py::test_censored_reduces_to_probit_at_tight_thresholds`).
+  - R cross-references run when R is available: `survival::survreg` (the
+    estimator behind `AER::tobit`) and `truncreg::truncreg` for the censored
+    and truncated models; an independent base-R Heckit MLE (probit + `optim`
+    on the joint log-likelihood, no `sampleSelection` required) for Heckit
+    (`tests/reference/fit_tobit.R`, `tests/reference/fit_heckit.R`).
+  - Python cross-reference: `py4etrics.Heckit` two-step matches censtrunc to
+    machine precision (`tests/test_heckit.py::test_twostep_matches_py4etrics`).
+- Heckit marginal effects via `get_margeff(kind=...)` for the four standard
+  Heckman quantities: `'latent'` ($X'\beta$), `'conditional'`
+  ($E[Y\!\mid\!S=1]$), `'unconditional'` ($E[Y\!\cdot\!S]$), and
+  `'prob-selected'` ($P(S\!=\!1)$). Variables present in both equations are
+  matched by feature name and have their X-side and Z-side derivatives
+  combined; standard errors come from the delta method on the joint MLE
+  covariance `cov_params_`. `ame()` / `mem()` shortcuts mirror the
+  censored/truncated API.
 - Shared conditional-mean module (`_means.py`) used by both `predict` and the
   marginal-effects machinery, keeping predictions and effects consistent.
 - Likelihood-ratio test in two equivalent forms:
@@ -61,9 +81,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every fitted-model summary.
 - statsmodels-style `summary()` with coefficient table, Wald inference,
   AIC/BIC, McFadden's pseudo-R², and per-region censoring counts.
-- Five executed example notebooks in `examples/`:
+- Six executed example notebooks in `examples/`:
   two-sided censoring, classical Tobit on Fair (1978), truncated regression,
-  validation against OLS and R, and a side-by-side visual comparison
-  of truncated vs censored fits with an asymptotic prediction band.
-- Test suite (29 tests, including Monte Carlo consistency checks) and a CI
+  validation (no-censoring limit + probit limit + R cross-reference), a
+  side-by-side visual comparison of truncated vs censored fits with an
+  asymptotic prediction band, and a Heckit notebook (simulation, py4etrics/R
+  cross-validation, marginal effects, and the canonical Mroz 1987 wage data).
+- Test suite (~120 tests, including Monte Carlo consistency checks) and a CI
   workflow that runs them on Python 3.10-3.13 across Linux and macOS.

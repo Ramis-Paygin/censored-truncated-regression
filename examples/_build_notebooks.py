@@ -1309,9 +1309,17 @@ def _build_heckit_notebook() -> nbf.NotebookNode:
             "The `educ` row reads: one extra year of schooling raises *expected"
             " log-wage among workers* by the `cond E[lwage]` figure, *and"
             " separately* raises the probability of being in the labour force by"
-            " the `P(in LF)` figure. Variables that enter only the selection"
-            " equation (`nwifeinc`, `age`, `kidslt6`, `kidsge6`) get a blank in"
-            " the `cond E[lwage]` column because they do not appear in $X$."
+            " the `P(in LF)` figure.\n"
+            "\n"
+            "Z-only variables (`nwifeinc`, `age`, `kidslt6`, `kidsge6`) still"
+            " appear in the `cond E[lwage]` column with very small,"
+            " statistically-insignificant entries. That is **not** a blank: they"
+            " do affect the conditional wage, but only *through the Mills-ratio"
+            " correction* $-\\gamma_v\\,\\rho\\,\\sigma\\,\\delta(Z'\\gamma)$. On Mroz"
+            " the estimated correlation $\\hat\\rho$ is close to zero (about"
+            " $0.03$), so that channel is numerically tiny and the entries land"
+            " around zero — exactly as one would expect when the selection"
+            " correction is weak."
         ),
     ]
     nb["cells"] = cells

@@ -17,10 +17,15 @@ method : {'dydx', 'eyex', 'dyex', 'eydx'}
     - ``'eyex'`` — elasticity  (dE[y]/dx_j)(x_j / E[y]).
     - ``'dyex'`` — semi-elasticity  (dE[y]/dx_j) x_j.
     - ``'eydx'`` — semi-elasticity  (dE[y]/dx_j)/E[y].
-kind : {'latent', 'censored', 'truncated'}
-    Which conditional mean the effect refers to (``'censored'`` = E[Y|X] is the
-    usual choice; this dimension has no analogue in the probit case but is
-    essential for censored/truncated models).
+kind : str
+    Which quantity to differentiate. For a :class:`CensoredRegression` you can
+    pick any of ``{'latent', 'censored', 'truncated', 'prob-left',
+    'prob-interior', 'prob-right'}`` — the first three are conditional means,
+    the last three are the probabilities of landing on the left bound, in the
+    interior, or on the right bound (these three sum to one, so their
+    marginal effects sum to zero). For a :class:`TruncatedRegression` only
+    ``'latent'`` and ``'truncated'`` are valid: the model has no censoring
+    region probabilities to differentiate.
 dummy : bool
     If ``True``, binary (0/1) regressors are given a **discrete difference**
     E[y | x=1] - E[y | x=0] instead of a derivative.
@@ -168,10 +173,14 @@ def _slope_indices(model: "CensoredRegression") -> tuple[np.ndarray, np.ndarray,
     """Return (param indices, design-column indices, names) for slope regressors.
 
     ``params_ = [sigma, beta_0, beta_1, ...]``; design columns line up with
-    ``feature_names_``. The intercept (if present) is excluded.
+    ``feature_names_``. The intercept is excluded whenever the first design
+    column is named ``'const'`` -- this is the case both when ``fit_intercept``
+    has prepended one *and* when the formula parser supplied an explicit
+    intercept (``from_formula`` paths set ``fit_intercept=False`` but still
+    yield a leading ``'const'`` column).
     """
     names = list(model.feature_names_)
-    if model.fit_intercept and names and names[0] == "const":
+    if names and names[0] == "const":
         slope_names = names[1:]
         col_idx = np.arange(1, 1 + len(slope_names))  # design columns (skip const at 0)
         param_idx = np.arange(2, 2 + len(slope_names))  # params (skip sigma at 0, const at 1)

@@ -144,3 +144,63 @@ def test_heckit_formula_rejects_non_binary_selection_lhs():
         HeckitRegression.from_formula(
             outcome="y ~ x", selection="s ~ x", data=df
         )
+
+
+# ----------------------------------------------------------------------
+# Regression guard: get_margeff must exclude the intercept whether the
+# model was fit through .fit(X, y) or through .from_formula(...). The
+# formula path sets fit_intercept=False but still emits a 'const' design
+# column from patsy, so any check that gates on fit_intercept (rather than
+# the 'const' name) was previously leaking the intercept into the
+# marginal-effects output table.
+# ----------------------------------------------------------------------
+
+
+def test_censored_formula_margeff_excludes_const(censored_df):
+    df = censored_df
+    m = CensoredRegression.from_formula(
+        "lwage ~ 1 + educ + exper + expersq", data=df, left=0.0,
+    ).fit()
+    ame = m.ame(kind="censored")
+    assert "const" not in ame.names
+    assert ame.names == ["educ", "exper", "expersq"]
+
+
+def test_truncated_formula_margeff_excludes_const():
+    rng = np.random.default_rng(0)
+    n = 1500
+    df = pd.DataFrame({"x1": rng.normal(size=n), "x2": rng.normal(size=n)})
+    ystar = 1.0 + 0.5*df["x1"] - 0.3*df["x2"] + rng.normal(size=n)
+    df["y"] = ystar
+    df = df[(df["y"] > 0) & (df["y"] < 2.5)]
+    m = TruncatedRegression.from_formula(
+        "y ~ 1 + x1 + x2", data=df, left=0.0, right=2.5,
+    ).fit()
+    ame = m.ame(kind="truncated")
+    assert "const" not in ame.names
+    assert ame.names == ["x1", "x2"]
+
+
+def test_heckit_formula_margeff_excludes_const():
+    rng = np.random.default_rng(42)
+    n = 3000
+    df = pd.DataFrame({
+        "shared": rng.normal(size=n),
+        "x_only": rng.normal(size=n),
+        "z_only": rng.normal(size=n),
+    })
+    beta_t = np.array([1.0, 0.5, -0.3])
+    gamma_t = np.array([0.0, 0.3, 0.6])
+    cov = np.array([[1.0, 0.5], [0.5, 1.0]])
+    e, u = rng.multivariate_normal([0, 0], cov, size=n).T
+    df["inlf"] = ((gamma_t[0] + df["shared"]*gamma_t[1] + df["z_only"]*gamma_t[2] + u) > 0).astype(int)
+    df["lwage"] = beta_t[0] + df["shared"]*beta_t[1] + df["x_only"]*beta_t[2] + e
+
+    m = HeckitRegression.from_formula(
+        outcome="lwage ~ 1 + shared + x_only",
+        selection="inlf  ~ 1 + shared + z_only",
+        data=df, method="mle",
+    ).fit()
+    for kind in ("latent", "conditional", "unconditional", "prob-selected"):
+        ame = m.ame(kind=kind)
+        assert "const" not in ame.names, kind

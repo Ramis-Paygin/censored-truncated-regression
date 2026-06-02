@@ -76,9 +76,17 @@ def _inverse_mills(t: np.ndarray) -> np.ndarray:
 
 
 def _slope_names(all_names: list[str], fit_intercept: bool) -> list[str]:
+    """Drop the intercept (named ``'const'``) from a list of design columns.
+
+    The intercept may be there either because ``fit_intercept=True`` prepended
+    one *or* because a formula like ``'y ~ 1 + x'`` parsed an explicit one
+    (``from_formula`` sets ``fit_intercept=False`` but still produces a
+    leading ``'const'`` column). We strip whenever the first name is
+    ``'const'``, regardless of the flag.
+    """
     if not all_names:
         return []
-    if fit_intercept and all_names[0] == "const":
+    if all_names[0] == "const":
         return list(all_names[1:])
     return list(all_names)
 
