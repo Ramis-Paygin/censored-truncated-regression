@@ -1,6 +1,6 @@
 # censtrunc
 
-[![Tests](https://github.com/<your-username>/censtrunc/actions/workflows/tests.yml/badge.svg)](https://github.com/<your-username>/censtrunc/actions/workflows/tests.yml)
+[![Tests](https://github.com/Ramis-Paygin/censored-truncated-regression/actions/workflows/tests.yml/badge.svg)](https://github.com/Ramis-Paygin/censored-truncated-regression/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 
@@ -186,7 +186,7 @@ pip install censtrunc
 From source:
 
 ```bash
-git clone https://github.com/<your-username>/censtrunc.git
+git clone https://github.com/Ramis-Paygin/censored-truncated-regression.git
 cd censtrunc
 pip install -e .[examples]   # examples extra installs pandas, matplotlib, jupyter
 ```

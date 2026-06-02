@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [
-    { name = "<Your Name>", email = "your.email@example.com" },
+    { name = "Ramis Paygin", email = "ramis.paygin.ramis.05@gmail.com" },
 ]
 keywords = [
     "tobit",
@@ -74,9 +74,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/<your-username>/censtrunc"
-Repository = "https://github.com/<your-username>/censtrunc"
-Issues = "https://github.com/<your-username>/censtrunc/issues"
+Homepage = "https://github.com/Ramis-Paygin/censored-truncated-regression"
+Repository = "https://github.com/Ramis-Paygin/censored-truncated-regression"
+Issues = "https://github.com/Ramis-Paygin/censored-truncated-regression/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
