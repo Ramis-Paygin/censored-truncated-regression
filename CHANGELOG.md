@@ -15,9 +15,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `HeckitRegression`: Heckman (1979) sample-selection regression with both the
   two-step estimator (probit on `Z` + OLS of `Y` on `(X, lambda_hat)` on the
   selected subsample) and the joint maximum-likelihood estimator. Includes a
-  `bootstrap()` helper for proper two-step standard errors and a `predict()`
-  with three kinds: `'outcome'` (`X'beta`), `'selection_prob'` (`Phi(Z'gamma)`),
-  and `'conditional'` (`E[Y | X, Z, S=1] = X'beta + rho*sigma*lambda(Z'gamma)`).
+  `bootstrap()` helper for proper two-step standard errors. `predict()` returns
+  any combination of **six** quantities via a one-letter `kind` argument (default
+  `'snpohu'` returns all six as a DataFrame):
+
+      s = selection probability      P(S=1|Z) = Phi(Z'gamma)
+      n = non-selection probability  1 - Phi(Z'gamma)
+      p = selection propensity       Z'gamma
+      o = E[Y | X, Z, S=1]           (observed conditional)
+      h = E[Y* | X] = X'beta         (hidden / unconditional latent)
+      u = E[Y* | X, Z, S=0]          (unobserved conditional)
+
+  Legacy long-name kinds (`'outcome'`, `'selection_prob'`, `'conditional'`)
+  alias `'h'`, `'s'`, `'o'` and continue to return 1-D arrays.
+  `HeckitRegression.get_margeff(kind=...)` exposes the four standard Heckman
+  marginal-effect quantities (`'latent'`, `'conditional'`, `'unconditional'`,
+  `'prob-selected'`), with X-side and Z-side derivatives combined automatically
+  for variables matched by name.
 - ``from_formula(formula, data, ...)`` constructors on all three model classes
   for patsy-style formula input (e.g. ``'lwage ~ 1 + educ + exper + expersq'``).
   ``HeckitRegression.from_formula`` takes separate ``outcome`` and ``selection``
