@@ -59,7 +59,15 @@ pre {
 .jp-CodeMirrorEditor {
     font-size: 10.5px !important;
 }
-@page { margin: 1.3cm; }
+@page {
+    margin: 1.3cm 1.3cm 1.6cm 1.3cm;   /* extra bottom margin for the page number */
+    @bottom-right {
+        content: counter(page);
+        font-family: sans-serif;
+        font-size: 9px;
+        color: #666;
+    }
+}
 </style>"""
 
 
