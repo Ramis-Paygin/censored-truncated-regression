@@ -84,6 +84,8 @@ def _intro_cells() -> list[nbf.NotebookNode]:
             "\n"
             "**Author:** Ramis Paygin  \n"
             "**Package:** `censtrunc` v0.1.0  \n"
+            "**Repository:** [github.com/Ramis-Paygin/censored-truncated-regression]"
+            "(https://github.com/Ramis-Paygin/censored-truncated-regression)  \n"
             "\n"
             "---\n"
             "\n"
@@ -518,6 +520,31 @@ def build_report(execute: bool = True) -> Path:
         " which are written independently."
     ))
     cells.extend(val_cells)
+
+    # --- Bibliography -------------------------------------------------
+    cells.append(_md(
+        "---\n\n## References\n\n"
+        "[1] Tobin, J. (1958). Estimation of Relationships for Limited Dependent"
+        " Variables. *Econometrica*, 26(1), 24–36.\n\n"
+        "[2] Olsen, R. J. (1978). A Note on the Uniqueness of the Maximum"
+        " Likelihood Estimator for the Tobit Model. *Econometrica*, 46(5),"
+        " 1211–1215.\n\n"
+        "[3] Heckman, J. J. (1979). Sample Selection Bias as a Specification"
+        " Error. *Econometrica*, 47(1), 153–161.\n\n"
+        "[4] Greene, W. H. (1981). On the Asymptotic Bias of the Ordinary Least"
+        " Squares Estimator of the Tobit Model. *Econometrica*, 49(2), 505–513.\n\n"
+        "[5] Fair, R. C. (1978). A Theory of Extramarital Affairs."
+        " *Journal of Political Economy*, 86(1), 45–61.\n\n"
+        "[6] Mroz, T. A. (1987). The Sensitivity of an Empirical Model of"
+        " Married Women's Hours of Work to Economic and Statistical Assumptions."
+        " *Econometrica*, 55(4), 765–799.\n\n"
+        "[7] Toomet, O., & Henningsen, A. (2008). Sample Selection Models in R:"
+        " Package sampleSelection. *Journal of Statistical Software*, 27(7).\n\n"
+        "[8] Wooldridge, J. M. (2010). *Econometric Analysis of Cross Section and"
+        " Panel Data* (2nd ed.). MIT Press.\n\n"
+        "[9] Greene, W. H. (2018). *Econometric Analysis* (8th ed.). Pearson.\n\n"
+        "[10] Hansen, B. E. (2022). *Econometrics*. Princeton University Press."
+    ))
 
     nb["cells"] = cells
     nb["metadata"] = {
