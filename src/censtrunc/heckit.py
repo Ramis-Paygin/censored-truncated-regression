@@ -783,8 +783,9 @@ class HeckitRegression:
         lines.append("=" * 78)
         if self.method == "twostep":
             lines.append(
-                "Note: two-step second-stage standard errors are naive; call .bootstrap(y, X, Z) "
-                "for proper Heckman-corrected SEs that account for the generated regressor."
+                "Note: two-step second-stage standard errors are naive;\n"
+                "      call .bootstrap(y, X, Z) for proper Heckman-corrected SEs\n"
+                "      that account for the generated regressor."
             )
             lines.append("=" * 78)
         return "\n".join(lines)
