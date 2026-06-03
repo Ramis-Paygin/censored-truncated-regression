@@ -326,9 +326,10 @@ def _part_b_cells() -> list[nbf.NotebookNode]:
             "\n"
             "Suppose the outcome of interest $Y$ is observed only when an"
             " individual is *selected* into the sample by an unobserved"
-            " mechanism. The canonical example is the wage equation: $Y =$"
-            " log-wage is observed only for those in the labour force. The"
-            " model is\n"
+            " mechanism. The canonical example is the wage equation: $Y ="
+            " \\log W$ is observed only for those in the labour force —"
+            " the standard Mincer specification [11]. The model is (with"
+            " $Y^*$ denoting latent log-wage)\n"
             "\n"
             "$$\n"
             "Y^* = X'\\beta + e, \\qquad S^* = Z'\\gamma + u, \\qquad"
@@ -543,7 +544,10 @@ def build_report(execute: bool = True) -> Path:
         "[8] Wooldridge, J. M. (2010). *Econometric Analysis of Cross Section and"
         " Panel Data* (2nd ed.). MIT Press.\n\n"
         "[9] Greene, W. H. (2018). *Econometric Analysis* (8th ed.). Pearson.\n\n"
-        "[10] Hansen, B. E. (2022). *Econometrics*. Princeton University Press."
+        "[10] Hansen, B. E. (2022). *Econometrics*. Princeton University Press.\n\n"
+        "[11] Mincer, J. (1974). *Schooling, Experience, and Earnings*."
+        " New York: Columbia University Press for the National Bureau of"
+        " Economic Research."
     ))
 
     nb["cells"] = cells
