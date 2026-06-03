@@ -1011,26 +1011,19 @@ _set(
 
 _set(
     54,
-    "Сумма вероятностей `s` и `n` равна единице. Три колонки уравнения"
-    " исхода — `h`, `o`, `u` — выражают разные условные средние:\n"
+    "Три колонки уравнения исхода связаны законом полного математического"
+    " ожидания:\n"
     "\n"
     "$$\\begin{aligned}\n"
-    "\\texttt{h} &= \\mathbb{E}[Y^* \\mid X] = X'\\hat\\beta, \\\\\n"
-    "\\texttt{o} &= \\mathbb{E}[Y \\mid X, Z, S=1]"
-    " = X'\\hat\\beta + \\hat\\rho\\hat\\sigma\\,\\lambda(Z'\\hat\\gamma), \\\\\n"
-    "\\texttt{u} &= \\mathbb{E}[Y^* \\mid X, Z, S=0]"
-    " = X'\\hat\\beta -"
-    " \\dfrac{\\hat\\rho\\hat\\sigma\\,\\phi(Z'\\hat\\gamma)}{1-\\Phi(Z'\\hat\\gamma)}.\n"
+    "\\underbrace{\\mathbb{E}[Y^* \\mid X]}_{\\texttt{h}}"
+    " &= \\underbrace{\\Phi(Z'\\hat\\gamma)}_{\\texttt{s}}"
+    " \\cdot \\underbrace{\\mathbb{E}[Y \\mid X, Z, S=1]}_{\\texttt{o}} \\\\\n"
+    "&\\quad + \\underbrace{[1-\\Phi(Z'\\hat\\gamma)]}_{\\texttt{n}}"
+    " \\cdot \\underbrace{\\mathbb{E}[Y^* \\mid X, Z, S=0]}_{\\texttt{u}},\n"
     "\\end{aligned}$$\n"
     "\n"
-    "По закону полного математического ожидания безусловное ожидание"
-    " наблюдаемого дохода равно\n"
-    "\n"
-    "$$\\mathbb{E}[Y \\cdot S \\mid X, Z] ="
-    " \\Phi(Z'\\hat\\gamma) \\cdot \\mathbb{E}[Y \\mid X, Z, S=1],$$\n"
-    "\n"
-    "то есть произведению вероятности занятости (`s`) на ожидаемый доход"
-    " среди занятых (`o`).",
+    "то есть безусловное латентное среднее (`h`) — это взвешенная сумма"
+    " ожиданий для занятых (`o`) и незанятых (`u`) с весами `s` и `n`.",
 )
 
 _set(
