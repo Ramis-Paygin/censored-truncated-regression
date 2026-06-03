@@ -1235,12 +1235,7 @@ _set(
     "Обе проверки включены в тесты"
     " (`tests/test_heckit.py::test_twostep_matches_py4etrics` и"
     " `tests/test_r_reference.py::test_heckit_mle_matches_R`); ячейки"
-    " ниже воспроизводят эти сравнения.\n"
-    "\n"
-    "Если `sampleSelection` локально не установлен, на macOS Apple"
-    " Silicon достаточно один раз выполнить"
-    " `brew install nlopt cmake pkg-config`, а затем"
-    " `install.packages('sampleSelection', dependencies = TRUE)`.",
+    " ниже воспроизводят эти сравнения.",
 )
 
 _set(
