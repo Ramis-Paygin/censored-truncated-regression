@@ -67,6 +67,25 @@ pre {
         color: #666;
     }
 }
+/* Make markdown tables fit page width and wrap long cell contents instead
+   of overflowing into the right margin. */
+.jp-RenderedHTMLCommon table,
+.jp-MarkdownOutput table {
+    width: 100% !important;
+    max-width: 100% !important;
+    table-layout: fixed !important;
+    font-size: 10px !important;
+}
+.jp-RenderedHTMLCommon table th,
+.jp-RenderedHTMLCommon table td,
+.jp-MarkdownOutput table th,
+.jp-MarkdownOutput table td {
+    word-wrap: break-word !important;
+    overflow-wrap: break-word !important;
+    white-space: normal !important;
+    padding: 4px 6px !important;
+    vertical-align: top !important;
+}
 </style>"""
 
 
