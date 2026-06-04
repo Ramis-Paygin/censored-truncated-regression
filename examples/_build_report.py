@@ -282,7 +282,8 @@ def _part_a_cells() -> list[nbf.NotebookNode]:
             "Every fitted model carries an overall likelihood-ratio test against"
             " the intercept-only null and McFadden's pseudo-$R^2$. Arbitrary"
             " nested models can be compared with `lr_test`, which returns"
-            " $LR = 2(\\ell_{\\text{full}} - \\ell_{\\text{restricted}}) \\sim \\chi^2_q$."
+            " $LR = 2(\\ell_{\\text{full}} - \\ell_{\\text{restricted}})"
+            " \\xrightarrow{d} \\chi^2_q$ (asymptotically, under the null)."
         ),
         _md(
             "## 3.2 Applications\n"
