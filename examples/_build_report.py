@@ -124,7 +124,7 @@ def _intro_cells() -> list[nbf.NotebookNode]:
             "The report is organised in two parts following the two model families."
             " Each part contains three sections: **theory**, **applications**"
             " demonstrating the API on simulated and real data, and **empirical"
-            " correctness checks** — analytical limits and cross-validation"
+            " correctness checks** — analytical limits and comparison"
             " against independent implementations."
         ),
         _md(
@@ -194,7 +194,7 @@ def _intro_cells() -> list[nbf.NotebookNode]:
             "- A unified `predict()` returning any combination of six quantities"
             " via a one-letter `kind` string — for the censored model `'hctlmr'`,"
             " for the Heckman model `'snpohu'`.\n"
-            "- **Cross-validation against external implementations** in the"
+            "- **Comparison against external implementations** in the"
             " test suite — see §3.3 and §4.3."
         ),
     ]
@@ -319,9 +319,9 @@ PART_A_VALIDATION_HEADING = (
     " reduces to a probit log-likelihood on $\\mathbf 1\\{Y^* > c\\}$ with"
     " $\\beta_{\\text{tobit}}/\\sigma_{\\text{tobit}} = \\beta_{\\text{probit}}$"
     " (Hansen 2022, §27.4);\n"
-    "3. **Cross-validation with R** — `survival::survreg` (the engine behind"
-    " `AER::tobit`) and `truncreg::truncreg` solve the same MLE; the two"
-    " implementations must converge to the same point."
+    "3. **Comparison with R implementations** — `survival::survreg` (the"
+    " engine behind `AER::tobit`) and `truncreg::truncreg` solve the same"
+    " MLE; the two implementations must converge to the same point."
 )
 
 PART_A_VALIDATION_NOTEBOOK = ("3.3 Validation", "04_validation.ipynb")
@@ -451,8 +451,8 @@ def _part_b_cells() -> list[nbf.NotebookNode]:
 # Markers in the Heckit notebook that switch between application and
 # validation sections. Each entry is (substring, new_state).
 HECKIT_SECTION_MARKERS = [
-    # Validation block 1: cross-validation against external implementations.
-    ("Cross-validation against",        "validation"),
+    # Validation block 1: comparison against external implementations.
+    ("Comparison against",              "validation"),
     # Application resumes: predict / formula / bootstrap / margeff / Mroz.
     ("Six kinds of prediction",         "application"),
     # Validation block 2: finite-difference cross-check of derivative formulas.
@@ -539,7 +539,7 @@ def build_report(execute: bool = True) -> Path:
         "\n"
         "1. **DGP recovery** is shown in §4.2 (the simulated data has known"
         " true parameters; the two-step and MLE estimates land close to them).\n"
-        "2. **Cross-validation with independent implementations** —"
+        "2. **Comparison with independent implementations** —"
         " `py4etrics.Heckit` (two-step only) and R's"
         " `sampleSelection::selection` (two-step and joint MLE) on the very"
         " same data. Both must converge to the same point as our"
