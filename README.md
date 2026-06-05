@@ -2,7 +2,7 @@
 
 [![Tests](https://github.com/Ramis-Paygin/censored-truncated-regression/actions/workflows/tests.yml/badge.svg)](https://github.com/Ramis-Paygin/censored-truncated-regression/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 
 **censtrunc** is a Python package for maximum-likelihood estimation of
 **censored and truncated normal regression models** with arbitrary left and
@@ -195,7 +195,7 @@ cd censtrunc
 pip install -e .[examples]   # examples extra installs pandas, matplotlib, jupyter
 ```
 
-`censtrunc` supports Python 3.10+ and depends only on **numpy** and **scipy**
+`censtrunc` supports Python 3.11+ and depends only on **numpy** and **scipy**
 at runtime.
 
 ## Quick start
